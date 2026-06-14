@@ -1,0 +1,55 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Default fallback to deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    // User accounts collection
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Customer directory collection
+    match /customers/{customerId} {
+      allow read, write: if true;
+    }
+
+    // Carpenters directory cards
+    match /carpenters/{carpenterId} {
+      allow read, write: if true;
+    }
+
+    // Interior designers directory cards
+    match /interiors/{interiorId} {
+      allow read, write: if true;
+    }
+
+    // Architects directory cards
+    match /architects/{architectId} {
+      allow read, write: if true;
+    }
+
+    // Builders directory cards
+    match /builders/{builderId} {
+      allow read, write: if true;
+    }
+
+    // Site visit records collection
+    match /visits/{visitId} {
+      allow read, write: if true;
+    }
+
+    // Dealers collection
+    match /dealers/{dealerId} {
+      allow read, write: if true;
+    }
+
+    // Connection test document
+    match /test/{testId} {
+      allow read: if true;
+    }
+  }
+}

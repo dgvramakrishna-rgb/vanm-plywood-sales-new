@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Sales Executive Daily Visits Tracker</string>
+    <string name="title_activity_main">Sales Executive Daily Visits Tracker</string>
+    <string name="package_name">com.salesvisits.tracker</string>
+    <string name="custom_url_scheme">com.salesvisits.tracker</string>
+</resources>

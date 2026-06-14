@@ -1,0 +1,284 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "App users representing field sales executives",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full name of the executive"
+        },
+        "mobile": {
+          "type": "string",
+          "description": "Mobile contact number used for authentication group"
+        },
+        "zone": {
+          "type": "string",
+          "description": "Territory region or sales division zone assigned to the user"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The exact date-time profile registration completed"
+        }
+      },
+      "required": ["name", "mobile", "zone"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Client profile records derived or standalone",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mobile": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "lastVisitDate": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "name", "mobile", "address"]
+    },
+    "Carpenter": {
+      "title": "Carpenter",
+      "description": "Professional carpentry service contractor profile",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mobile": {
+          "type": "string"
+        },
+        "clientName": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "lastVisitDate": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "name", "mobile"]
+    },
+    "Interior": {
+      "title": "Interior",
+      "description": "Interior design service partner profile",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mobile": {
+          "type": "string"
+        },
+        "clientName": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "lastVisitDate": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "name", "mobile"]
+    },
+    "Architect": {
+      "title": "Architect",
+      "description": "Architect partner profile",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mobile": {
+          "type": "string"
+        },
+        "clientName": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "lastVisitDate": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "name", "mobile"]
+    },
+    "Builder": {
+      "title": "Builder",
+      "description": "Builder partner profile",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mobile": {
+          "type": "string"
+        },
+        "clientName": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "lastVisitDate": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "name", "mobile"]
+    },
+    "SiteVisit": {
+      "title": "SiteVisit",
+      "description": "Aggregated architectural field record representing specific client site logs",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "clientName": {
+          "type": "string"
+        },
+        "clientMobile": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "latitude": {
+          "type": "number"
+        },
+        "longitude": {
+          "type": "number"
+        },
+        "photo": {
+          "type": "string"
+        },
+        "video": {
+          "type": "string"
+        },
+        "contractorType": {
+          "type": "string"
+        },
+        "contractorName": {
+          "type": "string"
+        },
+        "contractorMobile": {
+          "type": "string"
+        },
+        "contractorRemarks": {
+          "type": "string"
+        },
+        "contractorAddress": {
+          "type": "string"
+        },
+        "visitingDate": {
+          "type": "string"
+        },
+        "buildingStatus": {
+          "type": "string"
+        },
+        "leadStatus": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "customerNotAvailable": {
+          "type": "boolean"
+        },
+        "nearestLandmark": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "clientName", "clientMobile", "address", "visitingDate", "buildingStatus", "leadStatus", "createdAt"]
+    },
+    "Dealer": {
+      "title": "Dealer",
+      "description": "Dealer profile records on field workspace tracking",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "dealerPointName": {
+          "type": "string"
+        },
+        "place": {
+          "type": "string"
+        },
+        "mobile": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "name", "dealerPointName", "place", "mobile", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "Collection storing executive field-sales profiles"
+    },
+    "customers": {
+      "schema": "Customer",
+      "description": "Collection storing customer records"
+    },
+    "carpenters": {
+      "schema": "Carpenter",
+      "description": "Collection storing carpenter directory cards"
+    },
+    "interiors": {
+      "schema": "Interior",
+      "description": "Collection storing interior designers"
+    },
+    "architects": {
+      "schema": "Architect",
+      "description": "Collection storing architect designers"
+    },
+    "builders": {
+      "schema": "Builder",
+      "description": "Collection storing builder partners"
+    },
+    "visits": {
+      "schema": "SiteVisit",
+      "description": "Core collection of logged site visit diaries"
+    },
+    "dealers": {
+      "schema": "Dealer",
+      "description": "Collection storing registered dealers"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Sales Executive Daily Visits Tracker",
+  "description": "Daily visit tracker for sales executives, recording contacts, addresses, photos, dates, carpenter/interior details, and lead status.",
+  "requestFramePermissions": ["geolocation", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
