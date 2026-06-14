@@ -38,6 +38,16 @@ import {
 import { SiteVisit, Dealer } from '../types';
 import { compressImage } from '../utils/imageCompressor';
 
+// Helper to open URLs externally in Capacitor or native contexts gracefully
+const openExternalUrl = (url: string) => {
+  const isCapacitor = (window as any).Capacitor !== undefined;
+  if (isCapacitor) {
+    window.open(url, '_system');
+  } else {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+};
+
 interface DashboardProps {
   visits: SiteVisit[];
   dealers?: Dealer[];
@@ -100,7 +110,7 @@ export default function Dashboard({
 
   // Track profile form inputs
   const [profName, setProfName] = useState(currentUser?.name || '');
-  const [profCompany, setProfCompany] = useState(currentUser?.companyName || 'FieldConnect Pro');
+  const [profCompany, setProfCompany] = useState(currentUser?.companyName || 'VANM PLY Pro');
   const [profMobile, setProfMobile] = useState(currentUser?.mobile || '');
   const [isProfileExpanded, setIsProfileExpanded] = useState(true); // show by default for accessibility
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
@@ -110,7 +120,7 @@ export default function Dashboard({
     if (initialCurrentUser) {
       setCurrentUser(initialCurrentUser);
       setProfName(initialCurrentUser.name);
-      setProfCompany(initialCurrentUser.companyName || 'FieldConnect Pro');
+      setProfCompany(initialCurrentUser.companyName || 'VANM PLY Pro');
       setProfMobile(initialCurrentUser.mobile);
     }
   }, [initialCurrentUser]);
@@ -150,6 +160,39 @@ export default function Dashboard({
   // Followups sub-tab options within the Follow-Up tab: client, carpenter, interim, architect, builder
   const [activeFollowupSubTab, setActiveFollowupSubTab] = useState<'client' | 'carpenter' | 'interior' | 'architect' | 'builder'>('client');
   const [followupSearchQuery, setFollowupSearchQuery] = useState('');
+
+  // Persistence of completed/snoozed follow-ups (snoozed for 4 days)
+  const [snoozedFollowups, setSnoozedFollowups] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('fieldconnect_followup_snooze');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  const handleFollowupInteraction = (item: any, source: 'Call' | 'WhatsApp') => {
+    const identifier = item.mobile && item.mobile !== '0000000000' ? item.mobile : item.name;
+    const role = activeFollowupSubTab;
+    const key = `${identifier}_${role}`;
+    
+    // Calculate snooze date: 4 days from now
+    const d = new Date();
+    d.setDate(d.getDate() + 4);
+    const snoozeUntil = d.toISOString();
+    
+    const updatedSnoozes = { ...snoozedFollowups, [key]: snoozeUntil };
+    setSnoozedFollowups(updatedSnoozes);
+    localStorage.setItem('fieldconnect_followup_snooze', JSON.stringify(updatedSnoozes));
+
+    // Display a toast/alert notifying the user of this action
+    const displayRole = role === 'client' ? 'Client' 
+                     : role === 'carpenter' ? 'Carpenter' 
+                     : role === 'interior' ? 'Interior Designer' 
+                     : role === 'architect' ? 'Architect' 
+                     : 'Builder';
+                     
+    // Format the date 4 days from now nicely (e.g. DD/MM/YYYY)
+    const formattedDate = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+    
+    alert(`📢 Follow-up marked complete via ${source} for ${displayRole}: ${item.name}!\nRemoved from follow-up list. Will reappear on ${formattedDate} (4 days after).`);
+  };
   
   // Reports view internal state filters
   const [reportStageFilter, setReportStageFilter] = useState<string>('all');
@@ -211,6 +254,8 @@ export default function Dashboard({
   const [activeDirTab, setActiveDirTab] = useState<'customers' | 'carpenters' | 'interiors' | 'architects' | 'builders'>('customers');
   const [dirSearchQuery, setDirSearchQuery] = useState('');
   const [showCustomersPlaceWise, setShowCustomersPlaceWise] = useState<boolean>(true);
+  const [followupGroupMode, setFollowupGroupMode] = useState<'placewise' | 'buildingwise' | 'singlegrid'>('placewise');
+  const [dirGroupMode, setDirGroupMode] = useState<'placewise' | 'buildingwise' | 'singlegrid'>('placewise');
   
   // Selected Directory Item details modal state
   const [selectedDirItem, setSelectedDirItem] = useState<{ type: 'customer' | 'carpenter' | 'interior' | 'architect' | 'builder'; data: any } | null>(null);
@@ -235,7 +280,7 @@ export default function Dashboard({
   // Extract real entities from current DB visit logs to ensure organic integration:
   
   // 1. Customers map
-  const customersMap = new Map<string, { name: string; mobile: string; address: string; lastVisitDate: string; id: string; isCompleted?: boolean }>();
+  const customersMap = new Map<string, { name: string; mobile: string; address: string; lastVisitDate: string; id: string; isCompleted?: boolean; buildingType?: string }>();
   visits.forEach(v => {
     if (v.isCompleted) return;
     if (v.clientName && !customersMap.has(v.clientMobile)) {
@@ -245,14 +290,15 @@ export default function Dashboard({
         address: v.address,
         lastVisitDate: v.visitingDate,
         id: v.id,
-        isCompleted: false
+        isCompleted: false,
+        buildingType: v.buildingType || 'Home'
       });
     }
   });
   const customers = Array.from(customersMap.values());
 
   // 1b. Completed Customers map
-  const completedCustomersMap = new Map<string, { name: string; mobile: string; address: string; lastVisitDate: string; id: string; isCompleted?: boolean }>();
+  const completedCustomersMap = new Map<string, { name: string; mobile: string; address: string; lastVisitDate: string; id: string; isCompleted?: boolean; buildingType?: string }>();
   visits.forEach(v => {
     if (v.isCompleted && v.clientName && !completedCustomersMap.has(v.clientMobile)) {
       completedCustomersMap.set(v.clientMobile, {
@@ -261,7 +307,8 @@ export default function Dashboard({
         address: v.address,
         lastVisitDate: v.visitingDate,
         id: v.id,
-        isCompleted: true
+        isCompleted: true,
+        buildingType: v.buildingType || 'Home'
       });
     }
   });
@@ -1345,50 +1392,72 @@ Report generated locally from zone sync.`;
             {activeFollowupSubTab === 'client' && (
               <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-205 gap-3" id="display-mode-switch-followup">
                 <div className="flex items-center gap-2">
-                  <span className="flex items-center justify-center w-5 h-5 rounded-md bg-indigo-50 text-indigo-600 text-xs text-center font-bold">📍</span>
+                  <span className="flex items-center justify-center w-5 h-5 rounded-md bg-indigo-50 text-indigo-600 text-xs text-center font-bold">🏢</span>
                   <div>
-                    <span className="text-xs font-black text-slate-800 font-sans tracking-tight block">Display Mode</span>
-                    <p className="text-[10px] text-slate-500 font-sans leading-none">Group active customers by their place/address</p>
+                    <span className="text-xs font-black text-slate-800 font-sans tracking-tight block">Display Grouping</span>
+                    <p className="text-[10px] text-slate-500 font-sans leading-none">Group client contacts by their building category or place</p>
                   </div>
                 </div>
-                <div className="flex bg-slate-200/60 p-0.5 rounded-lg self-start sm:self-auto">
+                <div className="flex flex-wrap bg-slate-200/60 p-0.5 rounded-lg gap-0.5 self-start sm:self-auto">
                   <button
                     type="button"
-                    onClick={() => setShowCustomersPlaceWise(true)}
+                    onClick={() => {
+                      setFollowupGroupMode('placewise');
+                      setShowCustomersPlaceWise(true);
+                    }}
                     className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all duration-150 cursor-pointer ${
-                      showCustomersPlaceWise 
+                      followupGroupMode === 'placewise'
                         ? 'bg-white text-indigo-750 shadow-xs' 
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                     id="btn-followup-display-placewise"
                   >
-                    Place-Wise Grouping
+                    📍 Place-Wise
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShowCustomersPlaceWise(false)}
+                    onClick={() => {
+                      setFollowupGroupMode('buildingwise');
+                      setShowCustomersPlaceWise(false);
+                    }}
                     className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all duration-150 cursor-pointer ${
-                      !showCustomersPlaceWise 
+                      followupGroupMode === 'buildingwise'
+                        ? 'bg-white text-indigo-750 shadow-xs' 
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    id="btn-followup-display-buildingwise"
+                  >
+                    🏠 Building-Wise
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFollowupGroupMode('singlegrid');
+                      setShowCustomersPlaceWise(false);
+                    }}
+                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all duration-150 cursor-pointer ${
+                      followupGroupMode === 'singlegrid'
                         ? 'bg-white text-indigo-750 shadow-xs' 
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                     id="btn-followup-display-singlegrid"
                   >
-                    Single Grid
+                    🔲 Single Grid
                   </button>
                 </div>
               </div>
             )}
 
             {(() => {
-              let rawData: { name: string; mobile: string; clientName?: string; address?: string; lastVisitDate?: string }[] = [];
+              let rawData: { name: string; mobile: string; clientName?: string; address?: string; lastVisitDate?: string; buildingType?: string }[] = [];
               if (activeFollowupSubTab === 'client') {
                 rawData = Array.from(customersMap.values()).map(c => ({
                   name: c.name,
                   mobile: c.mobile,
                   clientName: c.name,
                   address: c.address,
-                  lastVisitDate: c.lastVisitDate
+                  lastVisitDate: c.lastVisitDate,
+                  buildingType: c.buildingType
                 }));
               } else if (activeFollowupSubTab === 'carpenter') {
                 rawData = carpenters;
@@ -1401,11 +1470,18 @@ Report generated locally from zone sync.`;
               }
 
               const query = followupSearchQuery.toLowerCase().trim();
-              const filtered = rawData.filter(item => 
-                item.name.toLowerCase().includes(query) || 
-                (item.clientName || '').toLowerCase().includes(query) ||
-                (item.mobile || '').includes(query)
-              );
+              const nowMs = Date.now();
+              const filtered = rawData.filter(item => {
+                const identifier = item.mobile && item.mobile !== '0000000000' ? item.mobile : item.name;
+                const key = `${identifier}_${activeFollowupSubTab}`;
+                const snoozeUntil = snoozedFollowups[key];
+                if (snoozeUntil && new Date(snoozeUntil).getTime() > nowMs) {
+                  return false;
+                }
+                return item.name.toLowerCase().includes(query) || 
+                  (item.clientName || '').toLowerCase().includes(query) ||
+                  (item.mobile || '').includes(query);
+              });
 
               if (filtered.length === 0) {
                 return (
@@ -1416,7 +1492,111 @@ Report generated locally from zone sync.`;
                 );
               }
 
-              if (activeFollowupSubTab === 'client' && showCustomersPlaceWise) {
+              if (activeFollowupSubTab === 'client' && followupGroupMode === 'buildingwise') {
+                const groupedByBuilding: Record<string, typeof filtered> = {
+                  'Home 🏠': [],
+                  'Duplex 🏡': [],
+                  'Apartment 🏢': [],
+                  'Shop 🏬': [],
+                  'Other 🏗️': []
+                };
+
+                filtered.forEach(item => {
+                  const bType = item.buildingType || 'Home';
+                  const key = bType === 'Home' ? 'Home 🏠'
+                    : bType === 'Duplex' ? 'Duplex 🏡'
+                    : bType === 'Apartment' ? 'Apartment 🏢'
+                    : bType === 'Shop' ? 'Shop 🏬'
+                    : 'Other 🏗️';
+                  groupedByBuilding[key].push(item);
+                });
+
+                const buildingKeys = Object.keys(groupedByBuilding).filter(k => groupedByBuilding[k].length > 0);
+
+                return (
+                  <div className="space-y-6" id="followup-buildingwise-sections">
+                    {buildingKeys.map((buildingName, gIdx) => (
+                      <div key={`${buildingName}-${gIdx}`} className="space-y-3 bg-slate-50/20 p-4.5 rounded-2xl border border-slate-200/60" id={`followup-building-group-${gIdx}`}>
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                          <h3 className="text-sm font-black text-slate-900 font-sans tracking-tight flex items-center gap-1.5">
+                            <span>{buildingName}</span>
+                            <span className="text-[10px] bg-indigo-100/60 text-indigo-850 px-1.5 py-0.5 rounded font-mono font-bold">
+                              {groupedByBuilding[buildingName].length} {groupedByBuilding[buildingName].length === 1 ? 'Customer' : 'Customers'}
+                            </span>
+                          </h3>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {groupedByBuilding[buildingName].map((item, idx) => {
+                            const hasMobile = item.mobile && item.mobile !== '0000000000';
+                            const activeDate = item.lastVisitDate ? formatDateToDDMMYYYY(item.lastVisitDate) : '';
+                            return (
+                              <div key={idx} className="p-4 rounded-xl border border-slate-150 bg-white hover:border-indigo-250 transition-all flex flex-col justify-between space-y-3 shadow-2xs">
+                                <div className="space-y-1">
+                                  <div className="flex justify-between items-start gap-2">
+                                    <div className="min-w-0 flex-1">
+                                      <h4 className="text-xs font-bold text-slate-800 leading-snug truncate">{item.name}</h4>
+                                      <p className="text-[10px] text-slate-500 font-sans truncate" title={item.address}>
+                                        📍 {item.address || 'No Address'}
+                                      </p>
+                                    </div>
+                                    <span className="text-[9px] uppercase font-mono px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100/50 shrink-0">
+                                      {item.buildingType || 'Home'}
+                                    </span>
+                                  </div>
+                                  {activeDate && (
+                                    <p className="text-[9px] text-slate-400 font-mono">
+                                      Last Visited: {activeDate}
+                                    </p>
+                                  )}
+                                </div>
+
+                                <div className="flex gap-2">
+                                  {hasMobile ? (
+                                    <a
+                                      href={`tel:${item.mobile}`}
+                                      onClick={() => handleFollowupInteraction(item, 'Call')}
+                                      className="flex-1 py-1.5 px-3 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100/50 text-indigo-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer text-center"
+                                    >
+                                      <PhoneCall size={10} />
+                                      <span>Call</span>
+                                    </a>
+                                  ) : (
+                                    <span className="flex-1 py-1.5 px-3 bg-slate-105 border border-slate-150 text-slate-400 rounded-lg text-[10px] font-bold flex items-center justify-center cursor-not-allowed select-none text-center">
+                                      No Phone
+                                    </span>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const cleanPh = item.mobile.replace(/\D/g, '').length === 10 ? '91' + item.mobile.replace(/\D/g, '') : item.mobile.replace(/\D/g, '');
+                                      setWhatsappSelectModal({
+                                        phone: cleanPh,
+                                        text: activeFollowupSubTab === 'client' 
+                                          ? `hello ${item.name} garu,i recently visited your site, work progress is good 👍, VANM PLYWOOD.thank you sir.`
+                                          : `hello ${item.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`,
+                                        name: item.name
+                                      });
+                                      handleFollowupInteraction(item, 'WhatsApp');
+                                    }}
+                                    className="flex-1 py-1.5 px-3 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100/50 text-emerald-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer text-center"
+                                  >
+                                    <MessageCircle size={10} />
+                                    <span>WhatsApp</span>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              }
+
+              if (activeFollowupSubTab === 'client' && followupGroupMode === 'placewise') {
                 const grouped: Record<string, typeof filtered> = {};
                 filtered.forEach(item => {
                   const pl = (item.address || 'No Address').trim();
@@ -1450,9 +1630,14 @@ Report generated locally from zone sync.`;
                               <div key={idx} className="p-4 rounded-xl border border-slate-150 bg-white hover:border-indigo-250 transition-all flex flex-col justify-between space-y-3 shadow-2xs">
                                 <div className="space-y-1">
                                   <div className="flex justify-between items-start gap-2">
-                                    <h4 className="text-xs font-bold text-slate-800 leading-snug">{item.name}</h4>
-                                    <span className="text-[9px] uppercase font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200/50">
-                                      Client
+                                    <div className="min-w-0 flex-1">
+                                      <h4 className="text-xs font-bold text-slate-800 leading-snug truncate">{item.name}</h4>
+                                      <span className="text-[9px] uppercase font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200/50">
+                                        Client
+                                      </span>
+                                    </div>
+                                    <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100/50 shrink-0">
+                                      {item.buildingType || 'Home'}
                                     </span>
                                   </div>
                                   {item.clientName && item.clientName !== item.name && (
@@ -1471,6 +1656,7 @@ Report generated locally from zone sync.`;
                                   {hasMobile ? (
                                     <a
                                       href={`tel:${item.mobile}`}
+                                      onClick={() => handleFollowupInteraction(item, 'Call')}
                                       className="flex-1 py-1.5 px-3 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100/50 text-indigo-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer text-center"
                                     >
                                       <PhoneCall size={10} />
@@ -1493,6 +1679,7 @@ Report generated locally from zone sync.`;
                                           : `hello ${item.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`,
                                         name: item.name
                                       });
+                                      handleFollowupInteraction(item, 'WhatsApp');
                                     }}
                                     className="flex-1 py-1.5 px-3 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100/50 text-emerald-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer text-center"
                                   >
@@ -1519,10 +1706,17 @@ Report generated locally from zone sync.`;
                       <div key={idx} className="p-4 rounded-xl border border-slate-100 bg-slate-50/30 hover:bg-white hover:border-slate-200/80 transition-all flex flex-col justify-between space-y-3">
                         <div className="space-y-1">
                           <div className="flex justify-between items-start gap-2">
-                            <h4 className="text-xs font-bold text-slate-800 leading-snug">{item.name}</h4>
-                            <span className="text-[9px] uppercase font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200/50">
-                              {activeFollowupSubTab}
-                            </span>
+                            <div className="min-w-0 flex-1">
+                              <h4 className="text-xs font-bold text-slate-800 leading-snug truncate">{item.name}</h4>
+                              <span className="text-[9px] uppercase font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200/50">
+                                {activeFollowupSubTab}
+                              </span>
+                            </div>
+                            {item.buildingType && (
+                              <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100/50 shrink-0">
+                                {item.buildingType}
+                              </span>
+                            )}
                           </div>
                           {item.clientName && item.clientName !== item.name && (
                             <p className="text-[10px] text-slate-550 font-sans">
@@ -1540,6 +1734,7 @@ Report generated locally from zone sync.`;
                           {hasMobile ? (
                             <a
                               href={`tel:${item.mobile}`}
+                              onClick={() => handleFollowupInteraction(item, 'Call')}
                               className="flex-1 py-1.5 px-3 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100/50 text-indigo-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer text-center"
                             >
                               <PhoneCall size={10} />
@@ -1562,6 +1757,7 @@ Report generated locally from zone sync.`;
                                   : `hello ${item.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`,
                                 name: item.name
                               });
+                              handleFollowupInteraction(item, 'WhatsApp');
                             }}
                             className="flex-1 py-1.5 px-3 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100/50 text-emerald-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer text-center"
                           >
@@ -1713,39 +1909,59 @@ Report generated locally from zone sync.`;
         <div>
           {activeDirTab === 'customers' && (
             <div className="space-y-5">
-              {/* Place-wise switch options */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-205 gap-3" id="display-mode-switch-dir">
                 <div className="flex items-center gap-2">
-                  <span className="flex items-center justify-center w-5 h-5 rounded-md bg-indigo-50 text-indigo-600 text-xs text-center font-bold">📍</span>
+                  <span className="flex items-center justify-center w-5 h-5 rounded-md bg-indigo-50 text-indigo-600 text-xs text-center font-bold">🏢</span>
                   <div>
-                    <span className="text-xs font-black text-slate-800 font-sans tracking-tight block">Display Mode</span>
-                    <p className="text-[10px] text-slate-500 font-sans leading-none">Group active customers by their place/address</p>
+                    <span className="text-xs font-black text-slate-800 font-sans tracking-tight block">Display Grouping</span>
+                    <p className="text-[10px] text-slate-500 font-sans leading-none">Group directory contacts by their building category or place</p>
                   </div>
                 </div>
-                <div className="flex bg-slate-200/60 p-0.5 rounded-lg self-start sm:self-auto">
+                <div className="flex flex-wrap bg-slate-200/60 p-0.5 rounded-lg gap-0.5 self-start sm:self-auto">
                   <button
                     type="button"
-                    onClick={() => setShowCustomersPlaceWise(true)}
+                    onClick={() => {
+                      setDirGroupMode('placewise');
+                      setShowCustomersPlaceWise(true);
+                    }}
                     className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all duration-150 cursor-pointer ${
-                      showCustomersPlaceWise 
+                      dirGroupMode === 'placewise'
                         ? 'bg-white text-indigo-750 shadow-xs' 
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                     id="btn-dir-display-placewise"
                   >
-                    Place-Wise Grouping
+                    📍 Place-Wise
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShowCustomersPlaceWise(false)}
+                    onClick={() => {
+                      setDirGroupMode('buildingwise');
+                      setShowCustomersPlaceWise(false);
+                    }}
                     className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all duration-150 cursor-pointer ${
-                      !showCustomersPlaceWise 
+                      dirGroupMode === 'buildingwise'
+                        ? 'bg-white text-indigo-750 shadow-xs' 
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    id="btn-dir-display-buildingwise"
+                  >
+                    🏠 Building-Wise
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirGroupMode('singlegrid');
+                      setShowCustomersPlaceWise(false);
+                    }}
+                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all duration-150 cursor-pointer ${
+                      dirGroupMode === 'singlegrid'
                         ? 'bg-white text-indigo-750 shadow-xs' 
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                     id="btn-dir-display-singlegrid"
                   >
-                    Single Grid
+                    🔲 Single Grid
                   </button>
                 </div>
               </div>
@@ -1765,7 +1981,118 @@ Report generated locally from zone sync.`;
                   );
                 }
 
-                if (showCustomersPlaceWise) {
+                if (dirGroupMode === 'buildingwise') {
+                  const groupedByBuilding: Record<string, typeof customers> = {
+                    'Home 🏠': [],
+                    'Duplex 🏡': [],
+                    'Apartment 🏢': [],
+                    'Shop 🏬': [],
+                    'Other 🏗️': []
+                  };
+
+                  filteredCustomers.forEach(c => {
+                    const bType = c.buildingType || 'Home';
+                    const key = bType === 'Home' ? 'Home 🏠'
+                      : bType === 'Duplex' ? 'Duplex 🏡'
+                      : bType === 'Apartment' ? 'Apartment 🏢'
+                      : bType === 'Shop' ? 'Shop 🏬'
+                      : 'Other 🏗️';
+                    groupedByBuilding[key].push(c);
+                  });
+
+                  const buildingKeys = Object.keys(groupedByBuilding).filter(k => groupedByBuilding[k].length > 0);
+
+                  return (
+                    <div className="space-y-6" id="dir-buildingwise-sections">
+                      {buildingKeys.map((buildingName, gIdx) => (
+                        <div key={`${buildingName}-${gIdx}`} className="space-y-3 bg-slate-50/20 p-4.5 rounded-2xl border border-slate-200/60" id={`dir-building-group-${gIdx}`}>
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                            <h3 className="text-sm font-black text-slate-900 font-sans tracking-tight flex items-center gap-1.5">
+                              <span>{buildingName}</span>
+                              <span className="text-[10px] bg-indigo-100/60 text-indigo-805 px-1.5 py-0.5 rounded font-mono font-bold">
+                                {groupedByBuilding[buildingName].length} {groupedByBuilding[buildingName].length === 1 ? 'Customer' : 'Customers'}
+                              </span>
+                            </h3>
+                          </div>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {groupedByBuilding[buildingName].map(c => (
+                              <div key={c.mobile} className="p-4 border border-slate-150 bg-white hover:border-indigo-250 rounded-xl shadow-2xs hover:shadow-xs transition-all space-y-3 relative group flex flex-col justify-between">
+                                <div className="space-y-3">
+                                  <div className="flex justify-between items-start">
+                                    <div className="min-w-0 flex-1">
+                                      <h4 className="text-sm font-bold text-slate-900 leading-snug truncate">{c.name}</h4>
+                                      <p className="text-[10px] text-slate-400 font-mono mt-0.5">Last Active: {c.lastVisitDate}</p>
+                                    </div>
+                                    <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-bold border border-emerald-100 uppercase tracking-wider text-[8px]">{c.buildingType || 'Home'}</span>
+                                  </div>
+                                  
+                                  <div className="space-y-1.5 text-xs text-slate-650 font-sans">
+                                    {c.address && (
+                                      <p className="line-clamp-2 text-slate-500 font-semibold truncate" title={c.address}>
+                                        <MapPin size={11} className="inline mr-1 text-slate-400" />
+                                        {c.address}
+                                      </p>
+                                    )}
+                                    <div className="flex flex-col sm:flex-row gap-2 pt-1 font-sans">
+                                      {c.mobile && c.mobile !== '0000000000' ? (
+                                        <a 
+                                          href={`tel:${c.mobile}`} 
+                                          className="bg-indigo-50 hover:bg-indigo-100 text-indigo-805 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition flex-1 cursor-pointer text-center"
+                                        >
+                                          <PhoneCall size={11} className="text-indigo-650" />
+                                          <span>Call Client</span>
+                                        </a>
+                                      ) : (
+                                        <span className="bg-slate-105 text-slate-400 border border-slate-150 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold select-none text-center flex-1">
+                                          No Mobile
+                                        </span>
+                                      )}
+                                      <button 
+                                        type="button"
+                                        onClick={() => {
+                                          const cleanPh = c.mobile.replace(/\D/g, '').length === 10 ? '91' + c.mobile.replace(/\D/g, '') : c.mobile.replace(/\D/g, '');
+                                          setWhatsappSelectModal({
+                                            phone: cleanPh,
+                                            text: `hello ${c.name} garu,i recently visited your site, work progress is good 👍, VANM PLYWOOD.thank you sir.`,
+                                            name: c.name
+                                          });
+                                        }}
+                                        className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition flex-1 cursor-pointer text-center"
+                                      >
+                                        <MessageCircle size={11} className="text-emerald-600 fill-emerald-50/20" />
+                                        <span>WhatsApp</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                                  <button 
+                                    onClick={() => setSelectedDirItem({ type: 'customer', data: c })}
+                                    className="flex-1 py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition uppercase"
+                                  >
+                                    <Eye size={10} />
+                                    <span>Show Details</span>
+                                  </button>
+                                  <button 
+                                    onClick={() => onDeleteCustomer?.(c.mobile)}
+                                    className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700 rounded-lg cursor-pointer transition"
+                                    title="Delete customer"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+
+                if (dirGroupMode === 'placewise') {
                   const grouped: Record<string, typeof customers> = {};
                   filteredCustomers.forEach(c => {
                     const pl = (c.address || 'No Address').trim();
@@ -1797,11 +2124,11 @@ Report generated locally from zone sync.`;
                               <div key={c.mobile} className="p-4 border border-slate-150 bg-white hover:border-indigo-250 rounded-xl shadow-2xs hover:shadow-xs transition-all space-y-3 relative group flex flex-col justify-between">
                                 <div className="space-y-3">
                                   <div className="flex justify-between items-start">
-                                    <div>
-                                      <h4 className="text-sm font-bold text-slate-900 leading-snug">{c.name}</h4>
+                                    <div className="min-w-0 flex-1">
+                                      <h4 className="text-sm font-bold text-slate-900 leading-snug truncate">{c.name}</h4>
                                       <p className="text-[10px] text-slate-400 font-mono mt-0.5">Last Active: {c.lastVisitDate}</p>
                                     </div>
-                                    <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-bold border border-emerald-100 uppercase tracking-wider text-[8px]">Client</span>
+                                    <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-bold border border-emerald-100 uppercase tracking-wider text-[8px]">{c.buildingType || 'Home'}</span>
                                   </div>
                                   
                                   <div className="space-y-1.5 text-xs text-slate-650 font-sans">
@@ -1821,7 +2148,7 @@ Report generated locally from zone sync.`;
                                           <span>Call Client</span>
                                         </a>
                                       ) : (
-                                        <span className="bg-slate-100/50 text-slate-400 border border-slate-100/30 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold select-none text-center flex-1">
+                                        <span className="bg-slate-105 text-slate-400 border border-slate-150 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold select-none text-center flex-1">
                                           No Mobile
                                         </span>
                                       )}
@@ -1876,11 +2203,11 @@ Report generated locally from zone sync.`;
                       <div key={c.mobile} className="p-4 border border-slate-150 bg-slate-50/40 hover:bg-white rounded-xl shadow-xs transition hover:shadow-sm space-y-3 relative group flex flex-col justify-between">
                         <div className="space-y-3">
                           <div className="flex justify-between items-start">
-                            <div>
-                              <h4 className="text-sm font-semibold text-slate-900 leading-snug">{c.name}</h4>
+                            <div className="min-w-0 flex-1">
+                              <h4 className="text-sm font-semibold text-slate-900 leading-snug truncate">{c.name}</h4>
                               <p className="text-[10px] text-slate-400 font-mono mt-0.5">Last Active: {c.lastVisitDate}</p>
                             </div>
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-100 uppercase tracking-wider text-[8px]">Client</span>
+                            <span className="px-2 py-0.5 roundedbg-amber-50 rounded text-amber-700 border border-amber-100/50 font-bold uppercase tracking-wider text-[8px]">{c.buildingType || 'Home'}</span>
                           </div>
                           
                           <div className="space-y-1.5 text-xs text-slate-650 font-sans">
@@ -1900,7 +2227,7 @@ Report generated locally from zone sync.`;
                                   <span>Call Client</span>
                                 </a>
                               ) : (
-                                <span className="bg-slate-100/50 text-slate-400 border border-slate-100/30 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold select-none text-center flex-1">
+                                <span className="bg-slate-105 text-slate-400 border border-slate-150 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold select-none text-center flex-1">
                                   No Mobile
                                 </span>
                               )}
@@ -3061,9 +3388,9 @@ Report generated locally from zone sync.`;
 
                 const handleShareGoogleMapsLocal = () => {
                   if (visit.latitude && visit.longitude) {
-                    window.open(`https://www.google.com/maps/dir/?api=1&destination=${visit.latitude},${visit.longitude}`, '_blank');
+                    openExternalUrl(`https://www.google.com/maps/dir/?api=1&destination=${visit.latitude},${visit.longitude}`);
                   } else {
-                    window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(visit.address)}`, '_blank');
+                    openExternalUrl(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(visit.address)}`);
                   }
                 };
 
@@ -3567,7 +3894,7 @@ Report generated locally from zone sync.`;
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-fade-in">
                     {filteredDealers.map((dealer) => {
                       const cleanPhone = dealer.mobile.replace(/\D/g, '');
-                      const customizedText = `Hello ${dealer.name}, this is FieldConnect sales representative following up regarding updates of dealer point: ${dealer.dealerPointName} at ${dealer.place}.`;
+                      const customizedText = `Hello ${dealer.name}, this is VANM PLY sales representative following up regarding updates of dealer point: ${dealer.dealerPointName} at ${dealer.place}.`;
 
                       return (
                         <div
@@ -4303,9 +4630,9 @@ Report generated locally from zone sync.`;
                                   type="button"
                                   onClick={() => {
                                     if (v.latitude && v.longitude) {
-                                      window.open(`https://www.google.com/maps/dir/?api=1&destination=${v.latitude},${v.longitude}`, '_blank');
+                                      openExternalUrl(`https://www.google.com/maps/dir/?api=1&destination=${v.latitude},${v.longitude}`);
                                     } else {
-                                      window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(v.address)}`, '_blank');
+                                      openExternalUrl(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(v.address)}`);
                                     }
                                   }}
                                   className="text-[10px] bg-indigo-50 hover:bg-indigo-100 border border-indigo-150 text-indigo-700 px-2 py-1 rounded font-bold transition flex items-center gap-1 cursor-pointer shrink-0"
@@ -4353,9 +4680,9 @@ Report generated locally from zone sync.`;
                                 type="button"
                                 onClick={() => {
                                   if (v.latitude && v.longitude) {
-                                    window.open(`https://www.google.com/maps/dir/?api=1&destination=${v.latitude},${v.longitude}`, '_blank');
+                                    openExternalUrl(`https://www.google.com/maps/dir/?api=1&destination=${v.latitude},${v.longitude}`);
                                   } else {
-                                    window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(v.address)}`, '_blank');
+                                    openExternalUrl(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(v.address)}`);
                                   }
                                 }}
                                 className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-150 rounded hover:border-indigo-250 transition cursor-pointer"
@@ -4476,17 +4803,13 @@ Report generated locally from zone sync.`;
                   type="button"
                   onClick={() => {
                     const encodedText = encodeURIComponent(whatsappSelectModal.text);
+                    const isCapacitor = (window as any).Capacitor !== undefined;
                     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-                    const isAndroid = /Android/i.test(navigator.userAgent);
                     let url = `https://api.whatsapp.com/send?phone=${whatsappSelectModal.phone}&text=${encodedText}`;
-                    if (isMobile) {
-                      if (isAndroid) {
-                        url = `intent://send?phone=${whatsappSelectModal.phone}&text=${encodedText}#Intent;package=com.whatsapp;scheme=whatsapp;end`;
-                      } else {
-                        url = `whatsapp://send?phone=${whatsappSelectModal.phone}&text=${encodedText}`;
-                      }
+                    if (isCapacitor || isMobile) {
+                      url = `whatsapp://send?phone=${whatsappSelectModal.phone}&text=${encodedText}`;
                     }
-                    window.open(url, '_blank', 'noopener,noreferrer');
+                    openExternalUrl(url);
                     setWhatsappSelectModal(null);
                   }}
                   className="w-full py-3.5 px-4 bg-emerald-50 hover:bg-emerald-150 border-2 border-emerald-250 text-emerald-950 rounded-xl font-bold text-xs flex items-center justify-between transition group cursor-pointer shadow-xs"
@@ -4506,17 +4829,19 @@ Report generated locally from zone sync.`;
                   type="button"
                   onClick={() => {
                     const encodedText = encodeURIComponent(whatsappSelectModal.text);
+                    const isCapacitor = (window as any).Capacitor !== undefined;
                     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-                    const isAndroid = /Android/i.test(navigator.userAgent);
+                    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
                     let url = `https://api.whatsapp.com/send?phone=${whatsappSelectModal.phone}&text=${encodedText}`;
-                    if (isMobile) {
-                      if (isAndroid) {
-                        url = `intent://send?phone=${whatsappSelectModal.phone}&text=${encodedText}#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end`;
-                      } else {
+                    if (isCapacitor || isMobile) {
+                      if (isIOS) {
                         url = `whatsapp-business://send?phone=${whatsappSelectModal.phone}&text=${encodedText}`;
+                      } else {
+                        // On Android, WhatsApp Business responds to standard whatsapp:// scheme and the system opens default or chooser
+                        url = `whatsapp://send?phone=${whatsappSelectModal.phone}&text=${encodedText}`;
                       }
                     }
-                    window.open(url, '_blank', 'noopener,noreferrer');
+                    openExternalUrl(url);
                     setWhatsappSelectModal(null);
                   }}
                   className="w-full py-3.5 px-4 bg-indigo-50 hover:bg-indigo-150 border-2 border-indigo-250 text-indigo-950 rounded-xl font-bold text-xs flex items-center justify-between transition group cursor-pointer shadow-xs"

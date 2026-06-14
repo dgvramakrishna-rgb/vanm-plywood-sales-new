@@ -6,3 +6,5 @@
   --font-display: "Space Grotesk", "Inter", sans-serif;
 }
 
+@variant dark (&:where(.dark, .dark *));
+

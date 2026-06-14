@@ -110,10 +110,30 @@ export default function App() {
     }, 4000);
   };
 
+  // Theme state & persistence
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const saved = localStorage.getItem('fieldconnect_theme');
+    if (saved === 'dark' || saved === 'light') return saved;
+    // Check system preference
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      return 'dark';
+    }
+    return 'light';
+  });
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('fieldconnect_theme', theme);
+  }, [theme]);
+
   // Top header Profile settings dropdown states
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [profName, setProfName] = useState(currentUser?.name || '');
-  const [profCompany, setProfCompany] = useState(currentUser?.companyName || 'FieldConnect Pro');
+  const [profCompany, setProfCompany] = useState(currentUser?.companyName || 'VANM PLY Pro');
   const [profMobile, setProfMobile] = useState(currentUser?.mobile || '');
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
 
@@ -121,7 +141,7 @@ export default function App() {
   useEffect(() => {
     if (currentUser) {
       setProfName(currentUser.name);
-      setProfCompany(currentUser.companyName || 'FieldConnect Pro');
+      setProfCompany(currentUser.companyName || 'VANM PLY Pro');
       setProfMobile(currentUser.mobile);
     }
   }, [currentUser]);
@@ -416,23 +436,26 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans" id="main-sales-app">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans transition-colors duration-150" id="main-sales-app">
       
       {/* Top Header Navigation bar in executive indigo-700 */}
-      <header className="sticky top-0 z-30 bg-indigo-700 text-white shadow-md shrink-0">
+      <header className="sticky top-0 z-30 bg-indigo-700 dark:bg-slate-900 text-white shadow-md border-b dark:border-slate-800/80 shrink-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             
             {/* Left side: branding/humble logo matching Professional Polish mockup */}
             <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
-              <div className="w-8 h-8 bg-white rounded flex items-center justify-center">
-                <div className="w-5 h-5 bg-indigo-700 rotate-45"></div>
-              </div>
+              <img 
+                src="/icon.svg" 
+                alt="VANM PLY Logo" 
+                className="w-10 h-10 rounded-xl bg-[#1c0f04] border border-orange-500/20 shadow-sm hover:scale-105 transition-transform duration-100"
+                referrerPolicy="no-referrer"
+              />
               <div>
-                <span className="font-display font-bold text-lg leading-none tracking-tight text-white block">
-                  FieldConnect <span className="font-normal opacity-80">Pro</span>
+                <span className="font-display font-black text-lg leading-none tracking-tight text-white block flex items-center gap-1">
+                  VANM <span className="text-orange-400 font-black">PLY</span> <span className="font-mono text-[9px] font-bold opacity-80 bg-white/10 px-1.5 py-0.5 rounded ml-1 tracking-wider uppercase">PRO</span>
                 </span>
-                <span className="text-[9px] uppercase tracking-wider font-bold text-indigo-200 font-mono hidden sm:block mt-0.5">
+                <span className="text-[8px] uppercase tracking-widest font-black text-indigo-200/90 font-mono hidden sm:block mt-0.5">
                   CRM Field Sync Active
                 </span>
               </div>
@@ -556,22 +579,22 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
-                className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-indigo-850 hover:bg-indigo-600 transition border border-indigo-550/30 text-left select-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-white/20"
+                className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-indigo-850 hover:bg-indigo-600 dark:bg-slate-800 dark:hover:bg-slate-700 transition border border-indigo-550/30 dark:border-slate-700 text-left select-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-white/20"
                 id="header-profile-trigger"
                 title="Manage Employee Profile"
               >
                 <div className="hidden md:flex flex-col items-end text-right">
                   <span className="text-white text-xs font-extrabold leading-none">{currentUser.name}</span>
-                  <span className="text-[9px] text-indigo-200 uppercase font-bold tracking-wider mt-0.5 opacity-90">
+                  <span className="text-[9px] text-indigo-200 dark:text-slate-400 uppercase font-bold tracking-wider mt-0.5 opacity-90">
                     {currentUser.companyName || 'FieldConnect Pro'}
                   </span>
                 </div>
                 
-                <div className="w-9 h-9 rounded-full bg-white text-indigo-700 font-black text-xs flex items-center justify-center shadow-md select-none border border-indigo-100 shrink-0">
+                <div className="w-9 h-9 rounded-full bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-400 font-black text-xs flex items-center justify-center shadow-md select-none border border-indigo-100 dark:border-slate-700 shrink-0">
                   {getInitials(currentUser.name)}
                 </div>
                 
-                <span className="text-[10px] text-indigo-300 select-none">▼</span>
+                <span className="text-[10px] text-indigo-300 dark:text-slate-400 select-none">▼</span>
               </button>
 
               <AnimatePresence>
@@ -581,21 +604,21 @@ export default function App() {
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.96, y: -10 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute right-0 top-14 w-80 bg-white text-slate-800 rounded-2xl shadow-2xl border border-slate-200/90 p-5 z-50 mt-1 space-y-4 font-sans"
+                    className="absolute right-0 top-14 w-80 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-2xl shadow-2xl border border-slate-200/90 dark:border-slate-800 p-5 z-50 mt-1 space-y-4 font-sans"
                     id="header-profile-dropdown"
                   >
                     {/* Popover Header */}
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
                       <div className="space-y-0.5">
-                        <span className="text-[10px] font-extrabold uppercase font-mono text-indigo-600 tracking-wider">
+                        <span className="text-[10px] font-extrabold uppercase font-mono text-indigo-600 dark:text-indigo-400 tracking-wider">
                           Executive Workspace
                         </span>
-                        <h3 className="text-sm font-black text-slate-900 tracking-tight">Your Profile</h3>
+                        <h3 className="text-sm font-black text-slate-900 dark:text-white tracking-tight">Your Profile</h3>
                       </div>
                       <button
                         type="button"
                         onClick={() => setIsProfileOpen(false)}
-                        className="text-slate-400 hover:text-slate-600 p-1 rounded-md transition hover:bg-slate-100"
+                        className="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-350 p-1 rounded-md transition hover:bg-slate-100 dark:hover:bg-slate-800"
                       >
                         <X size={15} />
                       </button>
@@ -606,11 +629,11 @@ export default function App() {
                       
                       {/* Employee Name */}
                       <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                        <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
                           Employee Name *
                         </label>
                         <div className="relative">
-                          <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-xs text-slate-400 pointer-events-none">
+                          <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-xs text-slate-400 dark:text-slate-500 pointer-events-none">
                             👤
                           </span>
                           <input
@@ -618,7 +641,7 @@ export default function App() {
                             required
                             value={profName}
                             onChange={(e) => setProfName(e.target.value)}
-                            className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white text-slate-800 font-semibold transition"
+                            className="w-full pl-8 pr-3 py-1.5 border border-slate-200 dark:border-slate-850 rounded-lg text-xs bg-slate-50/50 dark:bg-slate-950/40 focus:outline-none focus:ring-2 focus:ring-indigo-600 dark:focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100 font-semibold transition"
                             placeholder="e.g. Ramakrishna"
                           />
                         </div>
@@ -626,18 +649,18 @@ export default function App() {
 
                       {/* Company Name */}
                       <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                        <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
                           Company Name
                         </label>
                         <div className="relative">
-                          <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-xs text-slate-400 pointer-events-none">
+                          <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-xs text-slate-400 dark:text-slate-500 pointer-events-none">
                             🏢
                           </span>
                           <input
                             type="text"
                             value={profCompany}
                             onChange={(e) => setProfCompany(e.target.value)}
-                            className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white text-slate-800 font-semibold transition"
+                            className="w-full pl-8 pr-3 py-1.5 border border-slate-200 dark:border-slate-850 rounded-lg text-xs bg-slate-50/50 dark:bg-slate-950/40 focus:outline-none focus:ring-2 focus:ring-indigo-600 dark:focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100 font-semibold transition"
                             placeholder="e.g. Welspun Industries"
                           />
                         </div>
@@ -645,11 +668,11 @@ export default function App() {
 
                       {/* Mobile Number */}
                       <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                        <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
                           Mobile Number *
                         </label>
                         <div className="relative">
-                          <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-xs text-slate-400 pointer-events-none">
+                          <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-xs text-slate-400 dark:text-slate-500 pointer-events-none">
                             📞
                           </span>
                           <input
@@ -657,26 +680,59 @@ export default function App() {
                             required
                             value={profMobile}
                             onChange={(e) => setProfMobile(e.target.value)}
-                            className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white text-slate-800 font-semibold transition"
+                            className="w-full pl-8 pr-3 py-1.5 border border-slate-200 dark:border-slate-850 rounded-lg text-xs bg-slate-50/50 dark:bg-slate-950/40 focus:outline-none focus:ring-2 focus:ring-indigo-600 dark:focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100 font-semibold transition"
                             placeholder="10 digit number"
                           />
+                        </div>
+                      </div>
+
+                      {/* Theme Mode Toggle */}
+                      <div className="space-y-1.5 pt-1" id="theme-toggle-form-group">
+                        <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                          Theme Mode
+                        </label>
+                        <div className="flex bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200/40 dark:border-slate-800/80 gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setTheme('light')}
+                            className={`flex-1 py-1.5 px-3 text-xs font-bold rounded-md transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
+                              theme === 'light'
+                                ? 'bg-white text-indigo-750 font-black shadow-xs'
+                                : 'text-slate-550 dark:text-slate-400 hover:text-slate-850 dark:hover:text-slate-300'
+                            }`}
+                            id="theme-toggle-light"
+                          >
+                            <span>☀️ Light</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTheme('dark')}
+                            className={`flex-1 py-1.5 px-3 text-xs font-bold rounded-md transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
+                              theme === 'dark'
+                                ? 'bg-slate-855 dark:bg-slate-800 text-indigo-400 font-black shadow-xs'
+                                : 'text-slate-550 dark:text-slate-400 hover:text-slate-850 dark:hover:text-slate-300'
+                            }`}
+                            id="theme-toggle-dark"
+                          >
+                            <span>🌙 Dark</span>
+                          </button>
                         </div>
                       </div>
 
                     </div>
 
                     {profileMessage && (
-                      <p className="text-[11px] font-semibold text-center text-slate-700 bg-slate-50 py-1.5 rounded-lg border border-slate-100 animate-pulse">
+                      <p className="text-[11px] font-semibold text-center text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-850 py-1.5 rounded-lg border border-slate-100 dark:border-slate-800 animate-pulse">
                         {profileMessage}
                       </p>
                     )}
 
                     {/* Popover Action Buttons */}
-                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 shrink-0">
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 shrink-0">
                       <button
                         type="button"
                         onClick={handleLogout}
-                        className="text-[11px] font-bold text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-100 hover:border-rose-600 px-3 py-1.5 rounded-lg transition whitespace-nowrap cursor-pointer flex items-center gap-1.5"
+                        className="text-[11px] font-bold text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-100 hover:border-rose-600 dark:border-rose-950 px-3 py-1.5 rounded-lg transition whitespace-nowrap cursor-pointer flex items-center gap-1.5"
                       >
                         <LogOut size={11} />
                         <span>Sign Out</span>
@@ -685,7 +741,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={handleSaveProfile}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold px-4 py-1.5 rounded-lg shadow-sm hover:shadow transition whitespace-nowrap cursor-pointer"
+                        className="bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white text-[11px] font-bold px-4 py-1.5 rounded-lg shadow-sm hover:shadow transition whitespace-nowrap cursor-pointer"
                       >
                         Save Settings
                       </button>

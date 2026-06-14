@@ -27,6 +27,17 @@ import {
   Map
 } from 'lucide-react';
 import { SiteVisit, BuildingStatusOption } from '../types';
+import VisitMiniMap from './VisitMiniMap';
+
+// Helper to open URLs externally in Capacitor or native contexts gracefully
+const openExternalUrl = (url: string) => {
+  const isCapacitor = (window as any).Capacitor !== undefined;
+  if (isCapacitor) {
+    window.open(url, '_system');
+  } else {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+};
 
 interface VisitListProps {
   visits: SiteVisit[];
@@ -240,9 +251,9 @@ export default function VisitList({ visits, onDelete, onEdit }: VisitListProps) 
 
   const handleShareGoogleMaps = (visit: SiteVisit) => {
     if (visit.latitude && visit.longitude) {
-      window.open(`https://www.google.com/maps/dir/?api=1&destination=${visit.latitude},${visit.longitude}`, '_blank');
+      openExternalUrl(`https://www.google.com/maps/dir/?api=1&destination=${visit.latitude},${visit.longitude}`);
     } else {
-      window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(visit.address)}`, '_blank');
+      openExternalUrl(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(visit.address)}`);
     }
   };
 
@@ -703,9 +714,9 @@ export default function VisitList({ visits, onDelete, onEdit }: VisitListProps) 
                         onClick={(e) => {
                           e.stopPropagation();
                           if (visit.latitude && visit.longitude) {
-                            window.open(`https://www.google.com/maps/search/?api=1&query=${visit.latitude},${visit.longitude}`, '_blank');
+                            openExternalUrl(`https://www.google.com/maps/search/?api=1&query=${visit.latitude},${visit.longitude}`);
                           } else {
-                            window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(visit.address)}`, '_blank');
+                            openExternalUrl(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(visit.address)}`);
                           }
                         }}
                         className="w-full py-2 bg-slate-900 hover:bg-slate-950 hover:bg-indigo-900 transition-colors duration-155 text-white text-[10px] font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm text-center"
@@ -961,20 +972,30 @@ export default function VisitList({ visits, onDelete, onEdit }: VisitListProps) 
 
                   {/* GPS Location Section */}
                   {selectedVisitForDetail.latitude && selectedVisitForDetail.longitude ? (
-                    <div className="pt-2.5 border-t border-slate-100/70 flex items-center justify-between text-xs font-semibold text-teal-700">
-                      <span className="flex items-center gap-1.5 font-sans">
-                        <span className="w-1.5 h-1.5 rounded-full bg-teal-500 inline-block animate-pulse"></span>
-                        GPS: {selectedVisitForDetail.latitude.toFixed(6)}, {selectedVisitForDetail.longitude.toFixed(6)}
-                      </span>
-                      <button
-                        onClick={() => handleShareGoogleMaps(selectedVisitForDetail)}
-                        className="text-[10px] bg-teal-50 border border-teal-200 hover:bg-teal-100 text-teal-850 px-2.5 py-1 rounded transition flex items-center gap-1 cursor-pointer font-bold"
-                        title="Share GPS directions on Google Maps"
-                      >
-                        <Compass size={11} className="text-teal-600" />
-                        <span>Route Location</span>
-                      </button>
-                    </div>
+                    <>
+                      <div className="pt-2.5 border-t border-slate-100/70 flex items-center justify-between text-xs font-semibold text-teal-700">
+                        <span className="flex items-center gap-1.5 font-sans">
+                          <span className="w-1.5 h-1.5 rounded-full bg-teal-500 inline-block animate-pulse"></span>
+                          GPS: {selectedVisitForDetail.latitude.toFixed(6)}, {selectedVisitForDetail.longitude.toFixed(6)}
+                        </span>
+                        <button
+                          onClick={() => handleShareGoogleMaps(selectedVisitForDetail)}
+                          className="text-[10px] bg-teal-50 border border-teal-200 hover:bg-teal-100 text-teal-850 px-2.5 py-1 rounded transition flex items-center gap-1 cursor-pointer font-bold"
+                          title="Share GPS directions on Google Maps"
+                        >
+                          <Compass size={11} className="text-teal-600" />
+                          <span>Route Location</span>
+                        </button>
+                      </div>
+
+                      <div className="pt-2">
+                        <VisitMiniMap 
+                          latitude={selectedVisitForDetail.latitude}
+                          longitude={selectedVisitForDetail.longitude}
+                          clientName={selectedVisitForDetail.clientName}
+                        />
+                      </div>
+                    </>
                   ) : null}
                 </div>
 
