@@ -963,9 +963,9 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
                 {/* Site Address field */}
                 <div className="space-y-1.5" id="container-site-address">
                   <div className="flex justify-between items-center h-5">
-                    <span className="block text-xs font-semibold text-slate-600 font-sans">
-                      Place (City or Main Village Name only) *
-                    </span>
+                    <p className="block text-xs font-semibold text-slate-650 font-sans">
+                      City / Village (Place) *
+                    </p>
                     <button
                       type="button"
                       onClick={handleDetectLocation}
@@ -1006,7 +1006,7 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
                     <textarea
                       required
                       rows={2}
-                      placeholder="e.g. Guntur, Gollapudi (City or Main Village Name only)"
+                      placeholder="e.g. Tadepalligudem, Gollapudi (City or Village Name only)"
                       value={address}
                       onChange={(e) => {
                         cancelGpsSearch();
@@ -1021,9 +1021,9 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
                 {/* Location / Area field */}
                 <div className="space-y-1.5">
                   <div className="flex justify-between items-center h-5">
-                    <span className="block text-xs font-semibold text-slate-600 font-sans">
-                      Location / Area / Town <span className="text-slate-400 font-normal italic lowercase">(optional)</span>
-                    </span>
+                    <p className="block text-xs font-semibold text-slate-650 font-sans">
+                      Location / Area (Town / Ward) <span className="text-slate-400 font-normal italic lowercase">(Optional)</span>
+                    </p>
                     <button
                       type="button"
                       onClick={handleDetectLocation}

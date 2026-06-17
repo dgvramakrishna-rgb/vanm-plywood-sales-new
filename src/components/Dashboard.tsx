@@ -33,10 +33,20 @@ import {
   Navigation,
   Building2,
   Store,
-  RefreshCw
+  RefreshCw,
+  Bell,
+  BellOff,
+  Info,
+  CheckSquare
 } from 'lucide-react';
 import { SiteVisit, Dealer } from '../types';
 import { compressImage } from '../utils/imageCompressor';
+import { exportToCsv } from '../utils/fileExporter';
+import { 
+  requestNotificationPermission, 
+  getNotificationPermissionStatus, 
+  sendLocalNotification
+} from '../utils/notifications';
 
 // Helper to open URLs externally in Capacitor or native contexts gracefully
 const openExternalUrl = (url: string) => {
@@ -91,6 +101,7 @@ export default function Dashboard({
   // Navigation tab state within the Home Page: overview, followups, reports, absent, places, dealers, completed
   const [activeHomeTab, setActiveHomeTab] = useState<'overview' | 'followups' | 'reports' | 'absent' | 'places' | 'dealers' | 'completed'>('overview');
   const [placesFilter, setPlacesFilter] = useState<string>('');
+  const [expandedPlaces, setExpandedPlaces] = useState<Record<string, boolean>>({});
   const [dealersSearchQuery, setDealersSearchQuery] = useState('');
   
   // States for registering dealers
@@ -166,6 +177,110 @@ export default function Dashboard({
     const saved = localStorage.getItem('fieldconnect_followup_snooze');
     return saved ? JSON.parse(saved) : {};
   });
+
+  // Offline notifications state
+  const [notificationPermission, setNotificationPermission] = useState<'granted' | 'denied' | 'default'>('default');
+  const [autoNotifyClients, setAutoNotifyClients] = useState<boolean>(() => {
+    return localStorage.getItem('vanmply_notify_clients') !== 'false';
+  });
+  const [autoNotifyCarpenters, setAutoNotifyCarpenters] = useState<boolean>(() => {
+    return localStorage.getItem('vanmply_notify_carpenters') !== 'false';
+  });
+  const [autoNotifyInteriors, setAutoNotifyInteriors] = useState<boolean>(() => {
+    return localStorage.getItem('vanmply_notify_interiors') !== 'false';
+  });
+  const [testCountdown, setTestCountdown] = useState<number | null>(null);
+  const [showNotificationCenter, setShowNotificationCenter] = useState<boolean>(() => {
+    return localStorage.getItem('vanmply_show_notification_center') === 'true';
+  });
+
+  // Load and check notification permission status on component mount
+  React.useEffect(() => {
+    const checkStatus = async () => {
+      const status = await getNotificationPermissionStatus();
+      setNotificationPermission(status);
+    };
+    checkStatus();
+  }, []);
+
+  // Proactive automatic notification reminders on login / app open
+  React.useEffect(() => {
+    if (notificationPermission !== 'granted') return;
+
+    // Use sessionStorage to prevent spamming notifications multiple times in a single session
+    const sessionAlertSent = sessionStorage.getItem('vanmply_notify_session_sent');
+    if (sessionAlertSent === 'true') return;
+
+    const timer = setTimeout(() => {
+      // Safely compute counts inside the hook to prevent temporal dead zone
+      const pendingClientCount = visits.filter(v => !v.isCompleted && v.clientName).length;
+      
+      const carpentersMap = new Map();
+      visits.forEach(v => {
+        if (v.contractorType === 'carpenter' && v.contractorName) carpentersMap.set(v.contractorMobile, 1);
+        if (v.carpenterName && v.carpenterMobile) carpentersMap.set(v.carpenterMobile, 1);
+      });
+      const responseNeededCarpenters = carpentersMap.size;
+
+      const interiorsMap = new Map();
+      visits.forEach(v => {
+        if (v.contractorType === 'interior' && v.contractorName) interiorsMap.set(v.contractorMobile, 1);
+        if (v.interiorName && v.interiorMobile) interiorsMap.set(v.interiorMobile, 1);
+      });
+      const responseNeededInteriors = interiorsMap.size;
+
+      const title = 'VANM PLY: Active Follow-up Reminders';
+      let bodyParts: string[] = [];
+      
+      if (autoNotifyClients && pendingClientCount > 0) {
+        bodyParts.push(`${pendingClientCount} Clients`);
+      }
+      if (autoNotifyCarpenters && responseNeededCarpenters > 0) {
+        bodyParts.push(`${responseNeededCarpenters} Carpenters`);
+      }
+      if (autoNotifyInteriors && responseNeededInteriors > 0) {
+        bodyParts.push(`${responseNeededInteriors} Interiors`);
+      }
+
+      if (bodyParts.length > 0) {
+        sendLocalNotification(
+          title,
+          `📝 Pending updates: ${bodyParts.join(', ')}. Tap to view lists offline!`,
+          1000
+        );
+        sessionStorage.setItem('vanmply_notify_session_sent', 'true');
+      }
+    }, 4500); // 4.5 second delay for smooth startup experience
+
+    return () => clearTimeout(timer);
+  }, [notificationPermission, visits, autoNotifyClients, autoNotifyCarpenters, autoNotifyInteriors]);
+
+  const startNotificationTest = async () => {
+    const granted = await requestNotificationPermission();
+    setNotificationPermission(granted ? 'granted' : 'denied');
+    
+    if (!granted) {
+      alert("⚠️ Notification permissions are blocked. Please enable notices in your device/app options to support offline reminders.");
+      return;
+    }
+
+    setTestCountdown(3);
+    const interval = setInterval(() => {
+      setTestCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          clearInterval(interval);
+          // Trigger verification local notification
+          sendLocalNotification(
+            "🔔 VANM PLY: Offline Reminders Live!",
+            "Your offline notifications are working perfectly on this phone! 👍",
+            500
+          );
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
 
   const handleFollowupInteraction = (item: any, source: 'Call' | 'WhatsApp') => {
     const identifier = item.mobile && item.mobile !== '0000000000' ? item.mobile : item.name;
@@ -442,14 +557,14 @@ export default function Dashboard({
   });
   const builders = Array.from(buildersMap.values());
 
-  // Helper for determining human-friendly place of visit is changed to purely return the full visit address for address-wise grouping
+  // Helper for determining human-friendly place of visit is changed to purely return the location name for location-wise grouping
   const getPlaceName = React.useCallback((v: SiteVisit) => {
-    return v.address?.trim() || 'No Address';
+    return v.location?.trim() || v.address?.trim() || 'No Location Name';
   }, []);
 
   // Simple unique Places summary dataset
   const uniquePlacesList = React.useMemo(() => {
-    const placeMap: Record<string, { placeName: string; clientCount: number; carpenterCount: number; interiorCount: number }> = {};
+    const placeMap: Record<string, { placeName: string; clientCount: number; carpenterCount: number; interiorCount: number; visits: SiteVisit[] }> = {};
     
     visits.forEach(v => {
       const placeName = getPlaceName(v);
@@ -458,10 +573,14 @@ export default function Dashboard({
           placeName,
           clientCount: 0,
           carpenterCount: 0,
-          interiorCount: 0
+          interiorCount: 0,
+          visits: []
         };
       }
       
+      // Store the actual visit detail
+      placeMap[placeName].visits.push(v);
+
       // Increment clientCount (each visiting log is a client visit)
       placeMap[placeName].clientCount += 1;
       
@@ -481,7 +600,15 @@ export default function Dashboard({
     // Filter places with search filter
     if (placesFilter) {
       const query = placesFilter.toLowerCase();
-      return list.filter(p => p.placeName.toLowerCase().includes(query));
+      return list.filter(p => 
+        p.placeName.toLowerCase().includes(query) || 
+        p.visits.some(v => 
+          v.clientName.toLowerCase().includes(query) || 
+          (v.location && v.location.toLowerCase().includes(query)) ||
+          (v.carpenterName && v.carpenterName.toLowerCase().includes(query)) ||
+          (v.interiorName && v.interiorName.toLowerCase().includes(query))
+        )
+      );
     }
 
     return list;
@@ -761,29 +888,54 @@ export default function Dashboard({
 
   const handleExportCSVReport = () => {
     // Generate headers
-    const headers = ['Client Name', 'Mobile', 'Site Address', 'Visiting Date', 'Construction Stage', 'Lead Status', 'Contractor Type', 'Contractor Name', 'Notes'];
+    const headers = [
+      'Client Name', 
+      'Mobile', 
+      'Site Address', 
+      'Visiting Date', 
+      'Construction Stage', 
+      'Lead Status', 
+      'Contractor Type', 
+      'Contractor Name', 
+      'Carpenter Name',
+      'Carpenter Mobile',
+      'Carpenter Place',
+      'Interior Designer Partner Name',
+      'Interior Designer Mobile',
+      'Interior Designer Place',
+      'Builder Name',
+      'Builder Mobile',
+      'Builder Place',
+      'Architect Name',
+      'Architect Mobile',
+      'Architect Place',
+      'Notes'
+    ];
     const rows = activeProjectsList.map(p => [
       p.clientName,
       p.clientMobile,
-      p.address.replace(/,/g, ' '),
+      p.address,
       p.visitingDate,
       p.buildingStatus,
       p.leadStatus.toUpperCase(),
       p.contractorType,
       p.contractorName || 'None Assigned',
-      (p.notes || '').replace(/,/g, ' ').replace(/\n/g, ' ')
+      p.carpenterName || '',
+      p.carpenterMobile || '',
+      p.carpenterPlace || '',
+      p.interiorName || '',
+      p.interiorMobile || '',
+      p.interiorPlace || '',
+      p.builderName || '',
+      p.builderMobile || '',
+      p.builderPlace || '',
+      p.architectName || '',
+      p.architectMobile || '',
+      p.architectPlace || '',
+      p.notes || ''
     ]);
     
-    // Output standard compliant string
-    const csvRows = [headers.join(',')];
-    rows.forEach(r => csvRows.push(r.map(val => `"${val}"`).join(',')));
-    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + csvRows.join('\n');
-      
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.href = encodedUri;
-    link.download = `fieldconnect_pro_report_${todayStr}.csv`;
-    link.click();
+    exportToCsv(`fieldconnect_pro_report_${todayStr}.csv`, headers, rows);
   };
 
   const getDealerForPlace = (placeStr: string, defaultDealer: string) => {
@@ -1371,6 +1523,175 @@ Report generated locally from zone sync.`;
                 </button>
               );
             })}
+          </div>
+
+          {/* Offline Notification Configuration Panel */}
+          <div className="bg-gradient-to-br from-indigo-50/80 to-slate-50 border border-slate-200/90 rounded-2xl p-4 shadow-2xs" id="offline-notifications-dashboard">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100 shrink-0">
+                  <Bell size={16} className={notificationPermission === 'granted' ? "animate-bounce" : ""} />
+                </span>
+                <div>
+                  <h3 className="text-xs font-black text-slate-850 uppercase tracking-widest font-mono">
+                    Offline Device Notifications
+                  </h3>
+                  <p className="text-[10px] text-slate-500 font-sans leading-tight">
+                    Receive timely follow-up reminders in your phone's notification shade even when fully offline
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const state = !showNotificationCenter;
+                  setShowNotificationCenter(state);
+                  localStorage.setItem('vanmply_show_notification_center', String(state));
+                }}
+                className="px-3 py-1.5 text-[10px] font-bold text-indigo-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg cursor-pointer transition font-mono shadow-3xs self-start sm:self-auto"
+              >
+                {showNotificationCenter ? 'Hide Settings' : '🔧 Configure Alerts'}
+              </button>
+            </div>
+
+            {showNotificationCenter && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                className="mt-4 pt-4 border-t border-slate-200/60 space-y-4 overflow-hidden"
+              >
+                {/* 1. Device Permission Status Indicator */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl bg-white border border-slate-200 gap-3">
+                  <div className="space-y-1">
+                    <span className="text-[9px] font-bold text-slate-400 font-mono block uppercase tracking-wider">
+                      Android APK / PWA System Permission
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {notificationPermission === 'granted' ? (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                          <span className="text-xs font-bold text-emerald-800">ACTIVE & GRANTED</span>
+                        </>
+                      ) : notificationPermission === 'denied' ? (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                          <span className="text-xs font-bold text-rose-800">BLOCKED (Check Device/Browser Settings)</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                          <span className="text-xs font-bold text-amber-800">NOT ENABLED YET</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {notificationPermission !== 'granted' ? (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const granted = await requestNotificationPermission();
+                        setNotificationPermission(granted ? 'granted' : 'denied');
+                      }}
+                      className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-colors shadow-2xs cursor-pointer"
+                    >
+                      Grant Phone Permission
+                    </button>
+                  ) : (
+                    <div className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-100 px-2.5 py-1 rounded-lg font-mono font-bold">
+                      ✓ System Link Established
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Custom Switches to limit alert scope organically */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="bg-white border border-slate-200/80 p-3 rounded-xl flex items-center justify-between gap-2 shadow-3xs">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 font-sans block">Client Follow-Ups</span>
+                      <p className="text-[9px] text-slate-400 leading-tight">Notify about client response</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={autoNotifyClients}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          setAutoNotifyClients(val);
+                          localStorage.setItem('vanmply_notify_clients', String(val));
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-8 h-4 bg-slate-250 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-305 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+                  </div>
+
+                  <div className="bg-white border border-slate-200/80 p-3 rounded-xl flex items-center justify-between gap-2 shadow-3xs">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 font-sans block">Carpenter Visits</span>
+                      <p className="text-[9px] text-slate-400 leading-tight">Reminders of wood layout design</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={autoNotifyCarpenters}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          setAutoNotifyCarpenters(val);
+                          localStorage.setItem('vanmply_notify_carpenters', String(val));
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-8 h-4 bg-slate-250 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-305 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+                  </div>
+
+                  <div className="bg-white border border-slate-200/80 p-3 rounded-xl flex items-center justify-between gap-2 shadow-3xs">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 font-sans block">Interior Designers</span>
+                      <p className="text-[9px] text-slate-400 leading-tight">Notify color/finish reviews</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={autoNotifyInteriors}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          setAutoNotifyInteriors(val);
+                          localStorage.setItem('vanmply_notify_interiors', String(val));
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-8 h-4 bg-slate-250 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-305 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* 3. Real Live Test Tool */}
+                <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 decoration-none">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-black text-indigo-900 font-mono uppercase tracking-wider block">
+                      ⚡ Tap to Test Offline Notification Trigger
+                    </span>
+                    <p className="text-[9px] text-indigo-750 font-sans leading-relaxed">
+                      Tap the trigger, then lock your screen or close the screen immediately. A notification reminder will slide into your phone's notification shade after a 3-second simulation delay!
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={testCountdown !== null}
+                    onClick={startNotificationTest}
+                    className={`px-3.5 py-2.5 font-bold text-xs uppercase tracking-wider rounded-lg border transition ${
+                      testCountdown !== null
+                        ? 'bg-amber-100 text-amber-800 border-amber-200'
+                        : 'bg-indigo-600 hover:bg-indigo-750 text-white border-indigo-700 shadow-sm cursor-pointer'
+                    } shrink-0`}
+                  >
+                    {testCountdown !== null ? `Ringing in ${testCountdown}s...` : '🔔 Test Alarm'}
+                  </button>
+                </div>
+              </motion.div>
+            )}
           </div>
 
           {/* Search Bar */}
@@ -3645,27 +3966,186 @@ Report generated locally from zone sync.`;
                   className="bg-white border border-slate-200 hover:border-indigo-300 rounded-xl p-5 shadow-2xs hover:shadow-md transition-all duration-300 flex flex-col justify-between space-y-4"
                 >
                   {/* Title of Place */}
-                  <div>
-                    <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-3">
-                      <span className="text-sm font-extrabold text-slate-900 leading-snug tracking-tight font-sans block break-words">
-                        📍 {place.placeName}
-                      </span>
+                  <div className="flex-1 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-3">
+                        <span className="text-sm font-extrabold text-slate-900 leading-snug tracking-tight font-sans block break-words">
+                          📍 {place.placeName}
+                        </span>
+                      </div>
+
+                      {/* Quick statistics horizontal badges - Customer count, Carpenter count, Interior count only */}
+                      <div className="grid grid-cols-3 gap-2 mt-4 font-sans">
+                        <div className="bg-indigo-50/50 border border-indigo-100/30 p-2 rounded-lg text-center font-sans" title="Total Customers logged in this area">
+                          <span className="text-[9px] text-slate-400 block font-mono font-semibold">Customer Count</span>
+                          <span className="text-sm font-black text-indigo-700 mt-1 block">📊 {place.clientCount}</span>
+                        </div>
+                        <div className="bg-emerald-50/50 border border-emerald-100/30 p-2 rounded-lg text-center font-sans" title="Carpenters associated with visits in this area">
+                          <span className="text-[9px] text-slate-400 block font-mono font-semibold">Carpenter Count</span>
+                          <span className="text-sm font-black text-emerald-700 mt-1 block">🪚 {place.carpenterCount}</span>
+                        </div>
+                        <div className="bg-sky-50/50 border border-sky-100/30 p-2 rounded-lg text-center font-sans" title="Interior Designers associated with visits in this area">
+                          <span className="text-[9px] text-slate-400 block font-mono font-semibold">Interior Count</span>
+                          <span className="text-sm font-black text-sky-700 mt-1 block">📐 {place.interiorCount}</span>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Quick statistics horizontal badges - Customer count, Carpenter count, Interior count only */}
-                    <div className="grid grid-cols-3 gap-2 mt-4 font-sans">
-                      <div className="bg-indigo-50/50 border border-indigo-100/30 p-2 rounded-lg text-center font-sans" title="Total Customers logged in this area">
-                        <span className="text-[9px] text-slate-400 block font-mono font-semibold">Customer Count</span>
-                        <span className="text-sm font-black text-indigo-700 mt-1 block">📊 {place.clientCount}</span>
-                      </div>
-                      <div className="bg-emerald-50/50 border border-emerald-100/30 p-2 rounded-lg text-center font-sans" title="Carpenters associated with visits in this area">
-                        <span className="text-[9px] text-slate-400 block font-mono font-semibold">Carpenter Count</span>
-                        <span className="text-sm font-black text-emerald-700 mt-1 block">🪚 {place.carpenterCount}</span>
-                      </div>
-                      <div className="bg-sky-50/50 border border-sky-100/30 p-2 rounded-lg text-center font-sans" title="Interior Designers associated with visits in this area">
-                        <span className="text-[9px] text-slate-400 block font-mono font-semibold">Interior Count</span>
-                        <span className="text-sm font-black text-sky-700 mt-1 block">📐 {place.interiorCount}</span>
-                      </div>
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExpandedPlaces(prev => ({
+                            ...prev,
+                            [place.placeName]: !prev[place.placeName]
+                          }));
+                        }}
+                        className="w-full py-2 bg-indigo-50 border border-indigo-100/80 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        👥 {expandedPlaces[place.placeName] ? 'Hide Client Details' : `View City-wise Clients (${place.visits.length})`}
+                      </button>
+
+                      {expandedPlaces[place.placeName] && (
+                        <div className="mt-4 pt-4 border-t border-slate-100 space-y-4 font-sans animate-fade-in">
+                          <p className="text-[10px] font-extrabold text-slate-450 font-mono tracking-wider uppercase">Associated Customer Sites (City/Village-wise)</p>
+                          <div className="space-y-4 max-h-[420px] overflow-y-auto pr-1">
+                            {(() => {
+                              // Group visits of this location by v.address (City/Village)
+                              const grouped: Record<string, SiteVisit[]> = {};
+                              place.visits.forEach(visit => {
+                                const cityKey = (visit.address || 'Central City / Main Village').trim();
+                                if (!grouped[cityKey]) {
+                                  grouped[cityKey] = [];
+                                }
+                                grouped[cityKey].push(visit);
+                              });
+
+                              return Object.entries(grouped).map(([cityName, cityVisits]) => (
+                                <div key={cityName} className="space-y-2.5 border-l-2 border-emerald-500 pl-3">
+                                  <div className="flex items-center gap-1.5 text-[9.5px] font-black text-emerald-700 font-mono tracking-wider uppercase bg-emerald-50/70 py-1 px-2.5 rounded-lg border border-emerald-100/40 inline-flex">
+                                    <span>🏢 {cityName}</span>
+                                    <span className="bg-emerald-100 text-emerald-800 rounded-full h-4 min-w-4 px-1 flex items-center justify-center text-[9px] font-bold shrink-0">{cityVisits.length}</span>
+                                  </div>
+                                  <div className="space-y-3">
+                                    {cityVisits.map((visit, vIdx) => {
+                                      const vPhone = visit.clientMobile || '';
+                                      const hasVPhone = vPhone && vPhone !== '0000000000';
+                                      const cleanVPhone = vPhone.replace(/\D/g, '').length === 10 ? '91' + vPhone.replace(/\D/g, '') : vPhone.replace(/\D/g, '');
+                                      return (
+                                        <div key={vIdx} className="bg-slate-50/60 hover:bg-slate-50 border border-slate-150 rounded-xl p-3.5 space-y-3 transition shadow-3xs text-left">
+                                          <div className="flex justify-between items-start gap-2">
+                                            <div className="min-w-0 flex-1">
+                                              <h4 className="text-xs font-black text-slate-850 leading-tight">{visit.clientName}</h4>
+                                              <div className="flex flex-wrap gap-1 mt-1.5">
+                                                {visit.buildingType && (
+                                                  <span className="text-[8.5px] uppercase font-mono px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100/30">
+                                                    🏢 {visit.buildingType}
+                                                  </span>
+                                                )}
+                                                {visit.buildingStatus && (
+                                                  <span className="text-[8.5px] uppercase font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100/30">
+                                                    🔨 {visit.buildingStatus}
+                                                  </span>
+                                                )}
+                                                {visit.leadStatus && (
+                                                  <span className={`text-[8.5px] uppercase font-mono px-1.5 py-0.5 rounded border ${
+                                                    visit.leadStatus === 'hot' 
+                                                      ? 'bg-rose-50 text-rose-700 border-rose-100/50 font-bold' 
+                                                      : 'bg-slate-100 text-slate-550 border-slate-200/50'
+                                                  }`}>
+                                                    🔥 {visit.leadStatus === 'hot' ? 'HOT LEAD' : 'COLD'}
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+                                            <span className="text-[9px] font-mono text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded shrink-0">
+                                              {formatDateToDDMMYYYY(visit.visitingDate)}
+                                            </span>
+                                          </div>
+
+                                          {/* Landmark & Notes */}
+                                          {(visit.nearestLandmark || visit.notes) && (
+                                            <div className="text-[10px] text-slate-600 bg-white border border-slate-100 rounded-lg p-2 space-y-1">
+                                              {visit.nearestLandmark && (
+                                                <p className="leading-tight"><span className="font-extrabold text-slate-800">Landmark:</span> {visit.nearestLandmark}</p>
+                                              )}
+                                              {visit.notes && (
+                                                <p className="leading-normal italic text-slate-500 font-serif">"{visit.notes}"</p>
+                                              )}
+                                            </div>
+                                          )}
+
+                                          {/* Partners associated with visit */}
+                                          {(visit.carpenterName || visit.interiorName) && (
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[9.5px]">
+                                              {visit.carpenterName && (
+                                                <div className="bg-emerald-50/20 border border-emerald-100/30 rounded-lg p-1.5 flex flex-col justify-center">
+                                                  <span className="font-bold text-slate-400 font-mono text-[8.5px] uppercase">Associated Carpenter</span>
+                                                  <span className="font-semibold text-emerald-800 truncate">{visit.carpenterName}</span>
+                                                  {visit.carpenterMobile && visit.carpenterMobile !== '0000000000' && (
+                                                    <span className="text-[8px] text-slate-400 font-mono">{visit.carpenterMobile}</span>
+                                                  )}
+                                                </div>
+                                              )}
+                                              {visit.interiorName && (
+                                                <div className="bg-sky-50/20 border border-sky-100/30 rounded-lg p-1.5 flex flex-col justify-center">
+                                                  <span className="font-bold text-slate-400 font-mono text-[8.5px] uppercase">Associated Interior</span>
+                                                  <span className="font-semibold text-sky-800 truncate">{visit.interiorName}</span>
+                                                  {visit.interiorMobile && visit.interiorMobile !== '0000000000' && (
+                                                    <span className="text-[8px] text-slate-400 font-mono">{visit.interiorMobile}</span>
+                                                  )}
+                                                </div>
+                                              )}
+                                            </div>
+                                          )}
+
+                                          {/* Call / WhatsApp actions */}
+                                          <div className="flex gap-2 pt-1 border-t border-slate-100/60">
+                                            {hasVPhone ? (
+                                              <a
+                                                href={`tel:${vPhone}`}
+                                                className="flex-1 py-1 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100/50 text-indigo-700 font-bold text-[10px] rounded-lg transition flex items-center justify-center gap-1 cursor-pointer text-center"
+                                              >
+                                                <PhoneCall size={9} />
+                                                <span>Call</span>
+                                              </a>
+                                            ) : (
+                                              <span className="flex-1 py-1 bg-slate-100 border border-slate-150 text-slate-400 text-[10px] font-bold rounded-lg flex items-center justify-center cursor-not-allowed select-none">
+                                                No Phone
+                                              </span>
+                                            )}
+
+                                            {hasVPhone ? (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setWhatsappSelectModal({
+                                                    phone: cleanVPhone,
+                                                    text: `hello ${visit.clientName} garu,i recently visited your site, work progress is good 👍, VANM PLYWOOD.thank you sir.`,
+                                                    name: visit.clientName
+                                                  });
+                                                }}
+                                                className="flex-1 py-1 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100/50 text-emerald-700 font-bold text-[10px] rounded-lg transition flex items-center justify-center gap-1 cursor-pointer"
+                                              >
+                                                <MessageCircle size={9} />
+                                                <span>WhatsApp</span>
+                                              </button>
+                                            ) : (
+                                              <span className="flex-1 py-1 bg-slate-100 border border-slate-150 text-slate-400 text-[10px] font-bold rounded-lg flex items-center justify-center cursor-not-allowed select-none">
+                                                No WhatsApp
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ));
+                            })()}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -4229,9 +4709,9 @@ Report generated locally from zone sync.`;
               {/* Physical site description / address split */}
               <div className={quickAddModal === 'customer' ? "grid grid-cols-1 sm:grid-cols-2 gap-3" : "grid grid-cols-1 gap-3"} id="quick-add-address-grid">
                 <div className={quickAddModal === 'customer' ? "" : "col-span-1"}>
-                  <label className="block text-xs font-bold text-slate-600 mb-1.5 font-sans">
-                    {quickAddModal === 'customer' ? 'Place *' : `${quickAddModal.charAt(0).toUpperCase() + quickAddModal.slice(1)} Place`}
-                  </label>
+                  <p className="block text-xs font-bold text-slate-600 mb-1.5 font-sans">
+                    {quickAddModal === 'customer' ? 'City / Village (Place) *' : `${quickAddModal.charAt(0).toUpperCase() + quickAddModal.slice(1)} Place`}
+                  </p>
                   <div className="relative">
                     <span className="absolute top-2.5 left-0 flex items-start pl-3 text-slate-400">
                       <MapPin size={14} />
@@ -4249,9 +4729,9 @@ Report generated locally from zone sync.`;
 
                 {quickAddModal === 'customer' && (
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1.5 font-sans">
-                      Location / Area / Town (Optional)
-                    </label>
+                    <p className="block text-xs font-bold text-slate-600 mb-1.5 font-sans">
+                      Location / Area (Town / Ward) <span className="text-slate-400 font-normal italic lowercase">(Optional)</span>
+                    </p>
                     <div className="relative">
                       <span className="absolute top-2.5 left-0 flex items-start pl-3 text-slate-400">
                         <Navigation size={14} className="rotate-45" />

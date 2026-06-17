@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { SiteVisit, BuildingStatusOption } from '../types';
 import VisitMiniMap from './VisitMiniMap';
+import { exportToCsv } from '../utils/fileExporter';
 
 // Helper to open URLs externally in Capacitor or native contexts gracefully
 const openExternalUrl = (url: string) => {
@@ -216,37 +217,49 @@ export default function VisitList({ visits, onDelete, onEdit }: VisitListProps) 
       'Contractor Mobile',
       'Building Status',
       'Lead Status',
+      'Carpenter Name',
+      'Carpenter Mobile',
+      'Carpenter Place',
+      'Interior Designer Partner Name',
+      'Interior Designer Mobile',
+      'Interior Designer Place',
+      'Builder Name',
+      'Builder Mobile',
+      'Builder Place',
+      'Architect Name',
+      'Architect Mobile',
+      'Architect Place',
       'Notes'
     ];
 
-    // Rows
-    const csvRows = [
-      headers.join(','),
-      ...filteredVisits.map((v) => [
-        `"${v.visitingDate}"`,
-        `"${v.clientName.replace(/"/g, '""')}"`,
-        `"${v.clientMobile}"`,
-        `"${v.address.replace(/"/g, '""')}"`,
-        `"${v.contractorType}"`,
-        `"${v.contractorName.replace(/"/g, '""')}"`,
-        `"${v.contractorMobile}"`,
-        `"${v.buildingStatus}"`,
-        `"${v.leadStatus.toUpperCase()}"`,
-        `"${(v.notes || '').replace(/"/g, '""')}"`
-      ].join(','))
-    ];
+    // Data Map
+    const dataRows = filteredVisits.map((v) => [
+      v.visitingDate,
+      v.clientName,
+      v.clientMobile,
+      v.address,
+      v.contractorType,
+      v.contractorName,
+      v.contractorMobile,
+      v.buildingStatus,
+      v.leadStatus.toUpperCase(),
+      v.carpenterName || '',
+      v.carpenterMobile || '',
+      v.carpenterPlace || '',
+      v.interiorName || '',
+      v.interiorMobile || '',
+      v.interiorPlace || '',
+      v.builderName || '',
+      v.builderMobile || '',
+      v.builderPlace || '',
+      v.architectName || '',
+      v.architectMobile || '',
+      v.architectPlace || '',
+      v.notes || ''
+    ]);
 
-    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    
     const todayStr = new Date().toISOString().split('T')[0];
-    link.setAttribute('download', `Daily_Visits_Report_${todayStr}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    exportToCsv(`Daily_Visits_Report_${todayStr}.csv`, headers, dataRows);
   };
 
   const handleShareGoogleMaps = (visit: SiteVisit) => {
