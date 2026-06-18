@@ -82,19 +82,11 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       <div className="sm:mx-auto sm:w-full sm:max-w-xs">
         {/* Brand identity */}
         <div className="flex flex-col items-center">
-          <div className="relative mb-3.5">
-            <img 
-              src="/icon.svg" 
-              alt="VANM PLY App Icon" 
-              className="w-20 h-20 rounded-2xl shadow-md border-2 border-orange-500/10 object-contain hover:scale-105 transition-transform duration-200"
-              referrerPolicy="no-referrer"
-            />
-            <div className="absolute -bottom-1.5 -right-1.5 w-7 h-7 bg-orange-600 rounded-lg flex items-center justify-center text-[10px] text-white font-black shadow-md font-mono">
-              PRO
-            </div>
+          <div className="relative mb-3.5 px-3 py-1 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-mono text-[10px] font-black rounded-lg shadow-sm">
+            PRO EXECUTIVE WORKSPACE
           </div>
-          <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight text-center font-display">
-            VANM <span className="text-orange-600 font-extrabold">PLY</span>
+          <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight text-center font-display">
+            VANM <span className="text-orange-600 font-extrabold font-sans">PLY</span>
           </h2>
           <p className="mt-1.5 text-[9px] text-slate-500 dark:text-slate-400 font-extrabold uppercase font-mono tracking-widest text-center">
             CRM Cloud Sync & Executive Tracker

@@ -445,12 +445,6 @@ export default function App() {
             
             {/* Left side: branding/humble logo matching Professional Polish mockup */}
             <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
-              <img 
-                src="/icon.svg" 
-                alt="VANM PLY Logo" 
-                className="w-10 h-10 rounded-xl bg-[#1c0f04] border border-orange-500/20 shadow-sm hover:scale-105 transition-transform duration-100"
-                referrerPolicy="no-referrer"
-              />
               <div>
                 <span className="font-display font-black text-lg leading-none tracking-tight text-white block flex items-center gap-1">
                   VANM <span className="text-orange-400 font-black">PLY</span> <span className="font-mono text-[9px] font-bold opacity-80 bg-white/10 px-1.5 py-0.5 rounded ml-1 tracking-wider uppercase">PRO</span>

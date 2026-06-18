@@ -71,7 +71,6 @@ export async function sendLocalNotification(title: string, body: string, delayMs
             id: Math.floor(Math.random() * 1000000) + 1,
             schedule: trigger,
             sound: 'default',
-            smallIcon: 'ic_launcher_round',
             attachments: [],
             extra: null
           }
