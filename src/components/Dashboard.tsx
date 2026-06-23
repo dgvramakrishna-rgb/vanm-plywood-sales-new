@@ -32,6 +32,7 @@ import {
   UserX,
   Navigation,
   Building2,
+  Share2,
   Store,
   RefreshCw,
   Bell,
@@ -42,6 +43,7 @@ import {
 import { SiteVisit, Dealer } from '../types';
 import { compressImage } from '../utils/imageCompressor';
 import { exportToCsv } from '../utils/fileExporter';
+import { shareVisitDetails } from '../utils/shareUtils';
 import { 
   requestNotificationPermission, 
   getNotificationPermissionStatus, 
@@ -75,6 +77,7 @@ interface DashboardProps {
   onUpdateProfile?: (updated: { name: string; mobile: string; zone: string; companyName?: string }) => void;
   onSignOut?: () => void;
   onEditVisit?: (visit: SiteVisit) => void;
+  onTriggerToast?: (msg: string, type?: 'success' | 'info') => void;
 }
 
 export default function Dashboard({ 
@@ -93,13 +96,14 @@ export default function Dashboard({
   currentUser: initialCurrentUser,
   onUpdateProfile,
   onSignOut,
-  onEditVisit
+  onEditVisit,
+  onTriggerToast
 }: DashboardProps) {
-  // Current date constants based on provided timestamp metadata (2026-05-28)
-  const todayStr = '2026-05-28';
+  // Current date constants based on system date
+  const todayStr = new Date().toISOString().split('T')[0];
   
-  // Navigation tab state within the Home Page: overview, followups, reports, absent, places, dealers, completed
-  const [activeHomeTab, setActiveHomeTab] = useState<'overview' | 'followups' | 'reports' | 'absent' | 'places' | 'dealers' | 'completed'>('overview');
+  // Navigation tab state within the Home Page: overview, followups, reports, absent, places, dealers, completed, partners
+  const [activeHomeTab, setActiveHomeTab] = useState<'overview' | 'followups' | 'reports' | 'absent' | 'places' | 'dealers' | 'completed' | 'partners'>('overview');
   const [placesFilter, setPlacesFilter] = useState<string>('');
   const [expandedPlaces, setExpandedPlaces] = useState<Record<string, boolean>>({});
   const [dealersSearchQuery, setDealersSearchQuery] = useState('');
@@ -260,7 +264,7 @@ export default function Dashboard({
     setNotificationPermission(granted ? 'granted' : 'denied');
     
     if (!granted) {
-      alert("⚠️ Notification permissions are blocked. Please enable notices in your device/app options to support offline reminders.");
+      onTriggerToast?.("⚠️ Notification permissions are blocked. Please enable notices in your device options.", 'info');
       return;
     }
 
@@ -306,7 +310,7 @@ export default function Dashboard({
     // Format the date 4 days from now nicely (e.g. DD/MM/YYYY)
     const formattedDate = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
     
-    alert(`📢 Follow-up marked complete via ${source} for ${displayRole}: ${item.name}!\nRemoved from follow-up list. Will reappear on ${formattedDate} (4 days after).`);
+    onTriggerToast?.(`📢 Follow-up marked complete for ${displayRole}: ${item.name}!`, 'success');
   };
   
   // Reports view internal state filters
@@ -338,22 +342,48 @@ export default function Dashboard({
 
   const handleCopyImageToClipboard = async (base64Data: string, clientName: string) => {
     try {
-      const res = await fetch(base64Data);
-      const blob = await res.blob();
-      
+      // Instead of fetch, which can be flaky with large data URLs in some environments,
+      // we use an Image load + Canvas approach for both conversion and support.
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth || img.width;
+          canvas.height = img.naturalHeight || img.height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('Failed to get 2D canvas context'));
+            return;
+          }
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob((pngBlob) => {
+            if (pngBlob) {
+              resolve(pngBlob);
+            } else {
+              reject(new Error('Canvas conversion returned null blob'));
+            }
+          }, 'image/png');
+        };
+        img.onerror = () => {
+          reject(new Error('Failed to load image for clipboard conversion'));
+        };
+        img.src = base64Data;
+      });
+
       if (navigator.clipboard && window.ClipboardItem) {
         await navigator.clipboard.write([
           new ClipboardItem({
-            [blob.type]: blob
+            'image/png': blob
           })
         ]);
-        alert(`✅ Photo for ${clientName} copied successfully! You can paste (Ctrl+V or Cmd+V) directly on WhatsApp.`);
+        onTriggerToast?.(`✅ Photo for ${clientName} copied successfully! You can paste directly on WhatsApp.`, 'success');
       } else {
         const link = document.createElement('a');
-        link.href = base64Data;
+        link.href = URL.createObjectURL(blob);
         link.download = `${clientName.replace(/\s+/g, '_')}_site_visit.png`;
         link.click();
-        alert(`💾 Photo exported/downloaded as PNG! Drag and drop this picture into the WhatsApp chat.`);
+        URL.revokeObjectURL(link.href);
+        onTriggerToast?.(`💾 Photo exported as PNG! Drag and drop this picture into the WhatsApp chat.`, 'info');
       }
     } catch (err) {
       console.error("Clipboard copy error: ", err);
@@ -361,7 +391,7 @@ export default function Dashboard({
       link.href = base64Data;
       link.download = `${clientName.replace(/\s+/g, '_')}_site_visit.png`;
       link.click();
-      alert(`💾 Photo exported/downloaded as PNG! Drag and drop this picture into the WhatsApp chat.`);
+      onTriggerToast?.(`💾 Downloaded photo as fallback due to clipboard restrictions.`, 'info');
     }
   };
   
@@ -875,16 +905,16 @@ export default function Dashboard({
 
   // Today, Week, Month metrics for Customer Visits, Carpenter Meets, Interior Meets
   const todayCust = visits.filter(v => v.visitingDate === todayStr && v.contractorType === 'none').length;
-  const todayCarp = visits.filter(v => v.visitingDate === todayStr && v.contractorType === 'carpenter').length;
-  const todayInt = visits.filter(v => v.visitingDate === todayStr && v.contractorType === 'interior').length;
+  const todayCarp = visits.filter(v => v.visitingDate === todayStr && v.carpenterName).length;
+  const todayInt = visits.filter(v => v.visitingDate === todayStr && v.interiorName).length;
 
   const weekCust = visits.filter(v => v.contractorType === 'none' && getDaysElapsed(v.visitingDate) >= 0 && getDaysElapsed(v.visitingDate) <= 7).length;
-  const weekCarp = visits.filter(v => v.contractorType === 'carpenter' && getDaysElapsed(v.visitingDate) >= 0 && getDaysElapsed(v.visitingDate) <= 7).length;
-  const weekInt = visits.filter(v => v.contractorType === 'interior' && getDaysElapsed(v.visitingDate) >= 0 && getDaysElapsed(v.visitingDate) <= 7).length;
+  const weekCarp = visits.filter(v => v.carpenterName && getDaysElapsed(v.visitingDate) >= 0 && getDaysElapsed(v.visitingDate) <= 7).length;
+  const weekInt = visits.filter(v => v.interiorName && getDaysElapsed(v.visitingDate) >= 0 && getDaysElapsed(v.visitingDate) <= 7).length;
 
   const monthCust = visits.filter(v => v.contractorType === 'none' && getDaysElapsed(v.visitingDate) >= 0 && getDaysElapsed(v.visitingDate) <= 30).length;
-  const monthCarp = visits.filter(v => v.contractorType === 'carpenter' && getDaysElapsed(v.visitingDate) >= 0 && getDaysElapsed(v.visitingDate) <= 30).length;
-  const monthInt = visits.filter(v => v.contractorType === 'interior' && getDaysElapsed(v.visitingDate) >= 0 && getDaysElapsed(v.visitingDate) <= 30).length;
+  const monthCarp = visits.filter(v => v.carpenterName && getDaysElapsed(v.visitingDate) >= 0 && getDaysElapsed(v.visitingDate) <= 30).length;
+  const monthInt = visits.filter(v => v.interiorName && getDaysElapsed(v.visitingDate) >= 0 && getDaysElapsed(v.visitingDate) <= 30).length;
 
   const handleExportCSVReport = () => {
     // Generate headers
@@ -976,7 +1006,7 @@ export default function Dashboard({
           if (v.contractorType !== 'carpenter') continue;
           mobile = v.contractorMobile || v.clientMobile;
         } else if (type === 'interior') {
-          if (v.contractorType !== 'interior') continue;
+          if (v.contractorType !== 'interior' && v.contractorType !== 'architect') continue;
           mobile = v.contractorMobile || v.clientMobile;
         }
         
@@ -990,7 +1020,10 @@ export default function Dashboard({
 
     // 1. SECONDARY CUSTOMERS: present day customers, if less than 4, fill up to at least 4 using address-proximity sorted fallbacks
     text += `SECONDARY  CUSTOMER.\n\n`;
-    const secondaryCustomersList = dayVisits.filter(v => v.contractorType === 'none' || v.contractorType === undefined || !v.contractorType);
+    const secondaryCustomersList = dayVisits.filter(v => 
+      (v.contractorType === 'none' || v.contractorType === undefined || !v.contractorType) &&
+      v.clientMobile && v.clientMobile !== '0000000000'
+    );
     
     const uniqueMobilesInDay = new Set(secondaryCustomersList.map(v => v.clientMobile).filter(Boolean));
     const finalList = [...secondaryCustomersList];
@@ -1034,7 +1067,7 @@ export default function Dashboard({
 
     // 2. CARPENTERS: place wise else visit wise 3 to 4 members
     text += `CARPENTER/CONTRACTOR \n\n`;
-    const carpentersList = dayVisits.filter(v => v.contractorType === 'carpenter');
+    const carpentersList = dayVisits.filter(v => v.contractorType === 'carpenter' && (v.contractorMobile || v.clientMobile) && (v.contractorMobile || v.clientMobile) !== '0000000000');
     if (carpentersList.length > 0) {
       const placeWiseCarpenters = [...carpentersList].sort((a, b) => {
         const placeA = a.location || a.address || '';
@@ -1065,9 +1098,9 @@ export default function Dashboard({
       }
     }
 
-    // 3. INTERIOR/ARCHITECTS: take visit wise else address wise (Only 1 or 2 members)
+      // 3. INTERIOR/ARCHITECTS: take visit wise else address wise (Only 1 or 2 members)
     text += `INTERIOR/ARCHITECTS\n\n`;
-    const interiorsList = dayVisits.filter(v => v.contractorType === 'interior');
+    const interiorsList = dayVisits.filter(v => (v.contractorType === 'interior' || v.contractorType === 'architect') && (v.contractorMobile || v.clientMobile) && (v.contractorMobile || v.clientMobile) !== '0000000000');
     if (interiorsList.length > 0) {
       const visitWiseInteriors = [...interiorsList]
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -1120,13 +1153,14 @@ export default function Dashboard({
 
     let tomorrowCarpenters = carpenters.filter(c => {
       if (!cleanTomorrowPlace) return false;
+      if (!c.mobile || c.mobile === '0000000000') return false;
       const addressStr = (c.contractorAddress || c.address || '').toLowerCase();
       const nameStr = c.name.toLowerCase();
       return addressStr.includes(cleanTomorrowPlace) || nameStr.includes(cleanTomorrowPlace);
     });
 
     if (tomorrowCarpenters.length < 3) {
-      const otherCarpenters = carpenters.filter(c => !tomorrowCarpenters.some(tc => tc.mobile === c.mobile));
+      const otherCarpenters = carpenters.filter(c => !tomorrowCarpenters.some(tc => tc.mobile === c.mobile) && c.mobile && c.mobile !== '0000000000');
       tomorrowCarpenters = [...tomorrowCarpenters, ...otherCarpenters].slice(0, 3);
     } else {
       tomorrowCarpenters = tomorrowCarpenters.slice(0, 3);
@@ -1134,13 +1168,14 @@ export default function Dashboard({
 
     let tomorrowClients = customers.filter(c => {
       if (!cleanTomorrowPlace) return false;
+      if (!c.mobile || c.mobile === '0000000000') return false;
       const addressStr = (c.address || '').toLowerCase();
       const nameStr = c.name.toLowerCase();
       return addressStr.includes(cleanTomorrowPlace) || nameStr.includes(cleanTomorrowPlace);
     });
 
     if (tomorrowClients.length < 2) {
-      const otherClients = customers.filter(c => !tomorrowClients.some(tc => tc.mobile === c.mobile));
+      const otherClients = customers.filter(c => !tomorrowClients.some(tc => tc.mobile === c.mobile) && c.mobile && c.mobile !== '0000000000');
       tomorrowClients = [...tomorrowClients, ...otherClients].slice(0, 2);
     } else {
       tomorrowClients = tomorrowClients.slice(0, 2);
@@ -1219,9 +1254,9 @@ Report generated locally from zone sync.`;
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(summaryText);
-      alert('💬 Dynamic report output copied to clipboard! Open WhatsApp and paste to send.');
+      onTriggerToast?.('💬 Dynamic report output copied to clipboard! Paste into WhatsApp.', 'success');
     } else {
-      alert('Your browser does not support automatic clipboard copying. Please copy from the screen report highlights.');
+      onTriggerToast?.('Your browser does not support automatic clipboard copying.', 'info');
     }
   };
 
@@ -1387,6 +1422,22 @@ Report generated locally from zone sync.`;
                 {dealers.length}
               </span>
             )}
+          </button>
+
+          <button
+            onClick={() => setActiveHomeTab('partners')}
+            className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition cursor-pointer font-sans ${
+              activeHomeTab === 'partners'
+                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+            id="opt-tab-partners"
+          >
+            <UserPlus size={12} className="text-pink-500" />
+            <span>🤝 Site Partners</span>
+            <span className="text-[9px] bg-pink-100 text-pink-800 px-1.5 py-0.5 rounded-full font-bold">
+              New
+            </span>
           </button>
 
           <button
@@ -3181,9 +3232,9 @@ Report generated locally from zone sync.`;
                         const textToCopy = isCustomEditing ? customReportText : getCompiledDailyReportText();
                         if (navigator.clipboard) {
                           navigator.clipboard.writeText(textToCopy);
-                          alert("📋 Daily Status Report text draft copied to clipboard! Paste directly into SMS or WhatsApp.");
+                          onTriggerToast?.("📋 Daily Status Report draft copied!", 'success');
                         } else {
-                          alert("Error copying: Browser clipboard API is unavailable.");
+                          onTriggerToast?.("Error copying: Browser clipboard API is unavailable.", 'info');
                         }
                       }}
                       className="absolute right-3.5 bottom-3.5 px-3 py-1.8 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-md text-[11px] shadow-md transition flex items-center gap-1.5 cursor-pointer hover:scale-[1.02] active:scale-[0.98] font-sans"
@@ -3250,9 +3301,9 @@ Report generated locally from zone sync.`;
                         const textToCopy = isCustomPOAEditing ? customPOAReportText : getCompiledPOAReportText();
                         if (navigator.clipboard) {
                           navigator.clipboard.writeText(textToCopy);
-                          alert("🔮 Tomorrow's Plan of Action (POA) text draft copied to clipboard as a separate message! Ready to paste into SMS or WhatsApp.");
+                          onTriggerToast?.("🔮 Tomorrow's POA draft copied!", 'success');
                         } else {
-                          alert("Error copying: Browser clipboard API is unavailable.");
+                          onTriggerToast?.("Error copying: Browser clipboard API is unavailable.", 'info');
                         }
                       }}
                       className="absolute right-3.5 bottom-3.5 px-3 py-1.8 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-md text-[11px] shadow-md transition flex items-center gap-1.5 cursor-pointer hover:scale-[1.02] active:scale-[0.98] font-sans"
@@ -3277,9 +3328,9 @@ Report generated locally from zone sync.`;
                     const combined = `${daily}\n\n${poa}`;
                     if (navigator.clipboard) {
                       navigator.clipboard.writeText(combined);
-                      alert("🔗 Combined Report + Plan of Action copied to your clipboard!");
+                      onTriggerToast?.("🔗 Combined Report + POA copied to clipboard!", 'success');
                     } else {
-                      alert("Error copying: Browser clipboard API is unavailable.");
+                      onTriggerToast?.("Error copying: Browser clipboard API is unavailable.", 'info');
                     }
                   }}
                   className="px-3.5 py-1.8 hover:bg-slate-100 hover:text-slate-900 border border-slate-200 text-slate-600 font-extrabold rounded-lg text-xs transition cursor-pointer font-sans"
@@ -4152,7 +4203,6 @@ Report generated locally from zone sync.`;
               ))}
             </div>
           )}
-
         </div>
       )}
 
@@ -4454,6 +4504,359 @@ Report generated locally from zone sync.`;
                   </div>
                 );
               })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeHomeTab === 'partners' && (
+        <div className="space-y-6 animate-fade-in" id="partners-portal-view">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-6">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 pb-4">
+              <div className="space-y-1">
+                <h2 className="text-base font-extrabold text-slate-950 font-sans tracking-tight flex items-center gap-2">
+                  <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-pink-100 text-pink-600 text-xs">🤝</span>
+                  <span>Site Partners & Assignments</span>
+                </h2>
+                <p className="text-xs text-slate-500">
+                  View site details assigned to Carpenters, Interior Designers, and Architects.
+                </p>
+              </div>
+              
+              <div className="relative w-full md:w-72">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                  <Search size={14} />
+                </span>
+                <input
+                  type="text"
+                  placeholder="Search partners or site details..."
+                  value={dirSearchQuery}
+                  onChange={(e) => setDirSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-10 py-2 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-pink-600 transition font-sans text-slate-800"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-8">
+              {/* Carpenters Section */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5 font-mono border-b border-slate-100 pb-2">
+                  <Wrench size={14} className="text-amber-600" />
+                  <span>Carpenters ({carpenters.length})</span>
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {carpenters.filter(c => 
+                    c.name.toLowerCase().includes(dirSearchQuery.toLowerCase()) || 
+                    c.mobile.includes(dirSearchQuery)
+                  ).map(partner => {
+                    const assignedSites = visits.filter(v => v.contractorMobile === partner.mobile || v.carpenterMobile === partner.mobile);
+                    return (
+                      <div key={partner.id} className="bg-slate-50/50 border border-slate-200 rounded-xl p-4 space-y-3">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-900">{partner.name}</h4>
+                            <p className="text-[10px] font-mono text-slate-500">{partner.mobile}</p>
+                          </div>
+                          <a href={`tel:${partner.mobile}`} className="p-1.5 bg-white border border-slate-200 rounded hover:bg-slate-50 transition">
+                            <Phone size={12} className="text-indigo-600" />
+                          </a>
+                        </div>
+                        <div className="space-y-2">
+                          <span className="text-[9px] font-black uppercase text-slate-400 block tracking-widest">Assigned Sites</span>
+                          <div className="space-y-1.5">
+                            {assignedSites.length > 0 ? assignedSites.map((v, i) => (
+                              <div key={i} className="text-[10px] bg-white border border-slate-200 p-3 rounded-xl shadow-sm space-y-2">
+                                <div className="flex gap-2">
+                                  {v.photo && (
+                                    <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-100 flex-shrink-0">
+                                      <img src={v.photo} alt={v.clientName} className="w-full h-full object-cover" />
+                                    </div>
+                                  )}
+                                  <div className="min-w-0 flex-1">
+                                    <h5 className="font-bold text-slate-900 truncate">{v.clientName}</h5>
+                                    <a href={`tel:${v.clientMobile}`} className="text-indigo-600 font-bold flex items-center gap-1 mt-0.5" onClick={(e)=>e.stopPropagation()}>
+                                      <Phone size={10} />
+                                      <span>{v.clientMobile}</span>
+                                    </a>
+                                  </div>
+                                </div>
+                                <p className="text-slate-600 leading-snug">📍 {v.address}</p>
+                                {v.location && <p className="text-[9px] text-slate-400 font-medium">Area: {v.location}</p>}
+                                <div className="flex justify-between items-center pt-2 border-t border-slate-100/50">
+                                  <span className="text-[8px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-bold border border-indigo-100">{v.buildingStatus}</span>
+                                  <div className="flex items-center gap-2">
+                                    <button 
+                                      title="Share Location"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const mapUrl = v.latitude && v.longitude 
+                                          ? `https://www.google.com/maps?q=${v.latitude},${v.longitude}`
+                                          : `https://www.google.com/maps?q=${encodeURIComponent(v.address)}`;
+                                        
+                                        shareVisitDetails({
+                                          title: 'Customer Location',
+                                          text: `*Client Site Detail*\n\n*Client:* ${v.clientName}\n*Address:* ${v.address}`,
+                                          url: mapUrl,
+                                          photo: v.photo
+                                        });
+                                      }}
+                                      className="p-1 px-2 bg-slate-100/80 text-slate-600 rounded flex items-center gap-1 hover:bg-slate-200 transition font-extrabold cursor-pointer"
+                                    >
+                                      <Share2 size={10} />
+                                      <span className="text-[9px]">Share</span>
+                                    </button>
+                                    <span className="text-[8px] text-slate-400 font-mono">{formatDateToDDMMYYYY(v.visitingDate)}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            )) : <p className="text-[9px] text-slate-400 italic">No sites assigned yet</p>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Interior Designers Section */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5 font-mono border-b border-slate-100 pb-2">
+                  <Paintbrush size={14} className="text-purple-600" />
+                  <span>Interior Designers ({interiors.length})</span>
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {interiors.filter(i => 
+                    i.name.toLowerCase().includes(dirSearchQuery.toLowerCase()) || 
+                    i.mobile.includes(dirSearchQuery)
+                  ).map(partner => {
+                    const assignedSites = visits.filter(v => v.contractorMobile === partner.mobile || v.interiorMobile === partner.mobile);
+                    return (
+                      <div key={partner.id} className="bg-slate-50/50 border border-slate-200 rounded-xl p-4 space-y-3">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-900">{partner.name}</h4>
+                            <p className="text-[10px] font-mono text-slate-500">{partner.mobile}</p>
+                          </div>
+                          <a href={`tel:${partner.mobile}`} className="p-1.5 bg-white border border-slate-200 rounded hover:bg-slate-50 transition">
+                            <Phone size={12} className="text-indigo-600" />
+                          </a>
+                        </div>
+                        <div className="space-y-2">
+                          <span className="text-[9px] font-black uppercase text-slate-400 block tracking-widest">Assigned Sites</span>
+                          <div className="space-y-1.5">
+                            {assignedSites.length > 0 ? assignedSites.map((v, i) => (
+                              <div key={i} className="text-[10px] bg-white border border-slate-200 p-3 rounded-xl shadow-sm space-y-2">
+                                <div className="flex gap-2">
+                                  {v.photo && (
+                                    <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-100 flex-shrink-0">
+                                      <img src={v.photo} alt={v.clientName} className="w-full h-full object-cover" />
+                                    </div>
+                                  )}
+                                  <div className="min-w-0 flex-1">
+                                    <h5 className="font-bold text-slate-900 truncate">{v.clientName}</h5>
+                                    <a href={`tel:${v.clientMobile}`} className="text-indigo-600 font-bold flex items-center gap-1 mt-0.5" onClick={(e)=>e.stopPropagation()}>
+                                      <Phone size={10} />
+                                      <span>{v.clientMobile}</span>
+                                    </a>
+                                  </div>
+                                </div>
+                                <p className="text-slate-600 leading-snug">📍 {v.address}</p>
+                                {v.location && <p className="text-[9px] text-slate-400 font-medium">Area: {v.location}</p>}
+                                <div className="flex justify-between items-center pt-2 border-t border-slate-100/50">
+                                  <span className="text-[8px] bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded font-bold border border-purple-100">{v.buildingStatus}</span>
+                                  <div className="flex items-center gap-2">
+                                    <button 
+                                      title="Share Location"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const mapUrl = v.latitude && v.longitude 
+                                          ? `https://www.google.com/maps?q=${v.latitude},${v.longitude}`
+                                          : `https://www.google.com/maps?q=${encodeURIComponent(v.address)}`;
+                                        
+                                        shareVisitDetails({
+                                          title: 'Customer Location',
+                                          text: `*Client Site Detail*\n\n*Client:* ${v.clientName}\n*Address:* ${v.address}`,
+                                          url: mapUrl,
+                                          photo: v.photo
+                                        });
+                                      }}
+                                      className="p-1 px-2 bg-slate-100/80 text-slate-600 rounded flex items-center gap-1 hover:bg-slate-200 transition font-extrabold cursor-pointer"
+                                    >
+                                      <Share2 size={10} />
+                                      <span className="text-[9px]">Share</span>
+                                    </button>
+                                    <span className="text-[8px] text-slate-400 font-mono">{formatDateToDDMMYYYY(v.visitingDate)}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            )) : <p className="text-[9px] text-slate-400 italic">No sites assigned yet</p>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Architects Section */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5 font-mono border-b border-slate-100 pb-2">
+                  <Building2 size={14} className="text-blue-600" />
+                  <span>Architects ({architects.length})</span>
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {architects.filter(a => 
+                    a.name.toLowerCase().includes(dirSearchQuery.toLowerCase()) || 
+                    a.mobile.includes(dirSearchQuery)
+                  ).map(partner => {
+                    const assignedSites = visits.filter(v => v.contractorMobile === partner.mobile || v.architectMobile === partner.mobile);
+                    return (
+                      <div key={partner.id} className="bg-slate-50/50 border border-slate-200 rounded-xl p-4 space-y-3">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-900">{partner.name}</h4>
+                            <p className="text-[10px] font-mono text-slate-500">{partner.mobile}</p>
+                          </div>
+                          <a href={`tel:${partner.mobile}`} className="p-1.5 bg-white border border-slate-200 rounded hover:bg-slate-50 transition">
+                            <Phone size={12} className="text-indigo-600" />
+                          </a>
+                        </div>
+                        <div className="space-y-2">
+                          <span className="text-[9px] font-black uppercase text-slate-400 block tracking-widest">Assigned Sites</span>
+                          <div className="space-y-1.5">
+                            {assignedSites.length > 0 ? assignedSites.map((v, i) => (
+                              <div key={i} className="text-[10px] bg-white border border-slate-200 p-3 rounded-xl shadow-sm space-y-2">
+                                <div className="flex gap-2">
+                                  {v.photo && (
+                                    <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-100 flex-shrink-0">
+                                      <img src={v.photo} alt={v.clientName} className="w-full h-full object-cover" />
+                                    </div>
+                                  )}
+                                  <div className="min-w-0 flex-1">
+                                    <h5 className="font-bold text-slate-900 truncate">{v.clientName}</h5>
+                                    <a href={`tel:${v.clientMobile}`} className="text-indigo-600 font-bold flex items-center gap-1 mt-0.5" onClick={(e)=>e.stopPropagation()}>
+                                      <Phone size={10} />
+                                      <span>{v.clientMobile}</span>
+                                    </a>
+                                  </div>
+                                </div>
+                                <p className="text-slate-600 leading-snug">📍 {v.address}</p>
+                                {v.location && <p className="text-[9px] text-slate-400 font-medium">Area: {v.location}</p>}
+                                <div className="flex justify-between items-center pt-2 border-t border-slate-100/50">
+                                  <span className="text-[8px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-bold border border-blue-100">{v.buildingStatus}</span>
+                                  <div className="flex items-center gap-2">
+                                    <button 
+                                      title="Share Location"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const mapUrl = v.latitude && v.longitude 
+                                          ? `https://www.google.com/maps?q=${v.latitude},${v.longitude}`
+                                          : `https://www.google.com/maps?q=${encodeURIComponent(v.address)}`;
+                                        
+                                        shareVisitDetails({
+                                          title: 'Customer Location',
+                                          text: `*Client Site Detail*\n\n*Client:* ${v.clientName}\n*Address:* ${v.address}`,
+                                          url: mapUrl,
+                                          photo: v.photo
+                                        });
+                                      }}
+                                      className="p-1 px-2 bg-slate-100/80 text-slate-600 rounded flex items-center gap-1 hover:bg-slate-200 transition font-extrabold cursor-pointer"
+                                    >
+                                      <Share2 size={10} />
+                                      <span className="text-[9px]">Share</span>
+                                    </button>
+                                    <span className="text-[8px] text-slate-400 font-mono">{formatDateToDDMMYYYY(v.visitingDate)}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            )) : <p className="text-[9px] text-slate-400 italic">No sites assigned yet</p>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Builders Section */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5 font-mono border-b border-slate-100 pb-2">
+                  <Briefcase size={14} className="text-amber-700" />
+                  <span>Builders ({builders.length})</span>
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {builders.filter(b => 
+                    b.name.toLowerCase().includes(dirSearchQuery.toLowerCase()) || 
+                    b.mobile.includes(dirSearchQuery)
+                  ).map(partner => {
+                    const assignedSites = visits.filter(v => v.contractorMobile === partner.mobile || v.builderMobile === partner.mobile);
+                    return (
+                      <div key={partner.id} className="bg-slate-50/50 border border-slate-200 rounded-xl p-4 space-y-3">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-900">{partner.name}</h4>
+                            <p className="text-[10px] font-mono text-slate-500">{partner.mobile}</p>
+                          </div>
+                          <a href={`tel:${partner.mobile}`} className="p-1.5 bg-white border border-slate-200 rounded hover:bg-slate-50 transition">
+                            <Phone size={12} className="text-indigo-600" />
+                          </a>
+                        </div>
+                        <div className="space-y-2">
+                          <span className="text-[9px] font-black uppercase text-slate-400 block tracking-widest">Assigned Sites</span>
+                          <div className="space-y-1.5">
+                            {assignedSites.length > 0 ? assignedSites.map((v, i) => (
+                              <div key={i} className="text-[10px] bg-white border border-slate-200 p-3 rounded-xl shadow-sm space-y-2">
+                                <div className="flex gap-2">
+                                  {v.photo && (
+                                    <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-100 flex-shrink-0">
+                                      <img src={v.photo} alt={v.clientName} className="w-full h-full object-cover" />
+                                    </div>
+                                  )}
+                                  <div className="min-w-0 flex-1">
+                                    <h5 className="font-bold text-slate-900 truncate">{v.clientName}</h5>
+                                    <a href={`tel:${v.clientMobile}`} className="text-indigo-600 font-bold flex items-center gap-1 mt-0.5" onClick={(e)=>e.stopPropagation()}>
+                                      <Phone size={10} />
+                                      <span>{v.clientMobile}</span>
+                                    </a>
+                                  </div>
+                                </div>
+                                <p className="text-slate-600 leading-snug">📍 {v.address}</p>
+                                {v.location && <p className="text-[9px] text-slate-400 font-medium">Area: {v.location}</p>}
+                                <div className="flex justify-between items-center pt-2 border-t border-slate-100/50">
+                                  <span className="text-[8px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded font-bold border border-amber-100">{v.buildingStatus}</span>
+                                  <div className="flex items-center gap-2">
+                                    <button 
+                                      title="Share Location"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const mapUrl = v.latitude && v.longitude 
+                                          ? `https://www.google.com/maps?q=${v.latitude},${v.longitude}`
+                                          : `https://www.google.com/maps?q=${encodeURIComponent(v.address)}`;
+                                        
+                                        shareVisitDetails({
+                                          title: 'Customer Location',
+                                          text: `*Client Site Detail*\n\n*Client:* ${v.clientName}\n*Address:* ${v.address}`,
+                                          url: mapUrl,
+                                          photo: v.photo
+                                        });
+                                      }}
+                                      className="p-1 px-2 bg-slate-100/80 text-slate-600 rounded flex items-center gap-1 hover:bg-slate-200 transition font-extrabold cursor-pointer"
+                                    >
+                                      <Share2 size={10} />
+                                      <span className="text-[9px]">Share</span>
+                                    </button>
+                                    <span className="text-[8px] text-slate-400 font-mono">{formatDateToDDMMYYYY(v.visitingDate)}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            )) : <p className="text-[9px] text-slate-400 italic">No sites assigned yet</p>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         </div>

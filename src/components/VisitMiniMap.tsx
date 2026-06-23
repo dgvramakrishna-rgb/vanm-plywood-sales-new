@@ -17,7 +17,7 @@ interface VisitMiniMapProps {
 }
 
 export default function VisitMiniMap({ latitude, longitude, clientName }: VisitMiniMapProps) {
-  if (!hasValidKey) {
+  if (!hasValidKey || latitude === null || longitude === null || latitude === undefined || longitude === undefined) {
     return (
       <div 
         id="mini-map-placeholder"
@@ -32,22 +32,26 @@ export default function VisitMiniMap({ latitude, longitude, clientName }: VisitM
         
         <div className="space-y-1 max-w-[280px] z-10">
           <h4 className="text-xs font-extrabold text-slate-900 dark:text-white tracking-tight">
-            Live Mini Map View Available
+            {(!latitude || !longitude) ? "Location Details Not Available" : "Live Mini Map View Available"}
           </h4>
           <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-relaxed leading-normal">
-            To view visit coordinates on a live Google Map here, configure your <strong>GOOGLE_MAPS_PLATFORM_KEY</strong> in AI Studio:
+            {(!latitude || !longitude) 
+              ? "This visit record does not have valid GPS coordinates to display on a map." 
+              : "To view visit coordinates on a live Google Map here, configure your GOOGLE_MAPS_PLATFORM_KEY in AI Studio:"}
           </p>
         </div>
 
-        <div className="text-[9px] font-bold text-indigo-755 dark:text-indigo-400 bg-white dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800 px-3 py-1.5 rounded-lg max-w-[280px] z-10 text-left space-y-0.5">
-          <div className="flex items-center gap-1">
-            <Info size={10} className="text-indigo-600 shrink-0" />
-            <span className="font-extrabold uppercase font-mono tracking-wider">How to enable:</span>
+        {hasValidKey && (!latitude || !longitude) ? null : (
+          <div className="text-[9px] font-bold text-indigo-755 dark:text-indigo-400 bg-white dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800 px-3 py-1.5 rounded-lg max-w-[280px] z-10 text-left space-y-0.5">
+            <div className="flex items-center gap-1">
+              <Info size={10} className="text-indigo-600 shrink-0" />
+              <span className="font-extrabold uppercase font-mono tracking-wider">How to enable:</span>
+            </div>
+            <p className="font-semibold text-slate-600 dark:text-slate-400 leading-normal pl-3">
+              Open <strong>Settings (⚙️ Gear icon)</strong> → <strong>Secrets</strong> → add <code>GOOGLE_MAPS_PLATFORM_KEY</code> and save.
+            </p>
           </div>
-          <p className="font-semibold text-slate-600 dark:text-slate-400 leading-normal pl-3">
-            Open <strong>Settings (⚙️ Gear icon)</strong> → <strong>Secrets</strong> → add <code>GOOGLE_MAPS_PLATFORM_KEY</code> and save.
-          </p>
-        </div>
+        )}
       </div>
     );
   }

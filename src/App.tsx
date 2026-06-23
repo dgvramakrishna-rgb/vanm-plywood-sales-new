@@ -42,7 +42,13 @@ import {
 export default function App() {
   const [currentUser, setCurrentUser] = useState<{ name: string; mobile: string; zone: string; companyName?: string } | null>(() => {
     const saved = localStorage.getItem('fieldconnect_user');
-    return saved ? JSON.parse(saved) : null;
+    if (!saved) return null;
+    try {
+      return JSON.parse(saved);
+    } catch (e) {
+      console.warn("Corrupted user data in localStorage:", e);
+      return null;
+    }
   });
   const [visits, setVisits] = useState<SiteVisit[]>([]);
   const [dealers, setDealers] = useState<Dealer[]>([]);
@@ -242,7 +248,7 @@ export default function App() {
     const isEdit = !!visitInput.id;
     const finalVisit: SiteVisit = {
       ...visitInput,
-      id: visitInput.id || crypto.randomUUID(),
+      id: visitInput.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'idx-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)),
       createdAt: visitInput.createdAt || new Date().toISOString()
     };
 
@@ -287,7 +293,7 @@ export default function App() {
   const handleSaveDealer = async (dealerInput: Omit<Dealer, 'id' | 'createdAt'> & { id?: string; createdAt?: string }) => {
     const finalDealer: Dealer = {
       ...dealerInput,
-      id: dealerInput.id || crypto.randomUUID(),
+      id: dealerInput.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'dlr-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)),
       createdAt: dealerInput.createdAt || new Date().toISOString()
     };
     try {
@@ -787,6 +793,7 @@ export default function App() {
                     setEditingVisit(visit);
                     setActiveTab('new-visit');
                   }}
+                  onTriggerToast={(msg, type) => triggerToast(msg, type)}
                   onDeleteCustomer={async (mobile) => {
                     const toDelete = visits.filter(v => v.clientMobile === mobile);
                     setDeleteConfirm({

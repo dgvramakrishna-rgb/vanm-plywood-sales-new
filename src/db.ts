@@ -335,7 +335,14 @@ export async function saveDealerToFirestore(dealer: { id: string; name: string; 
     }));
     // Update local cache
     const cached = localStorage.getItem('fieldconnect_dealers_cache');
-    const dealers = cached ? JSON.parse(cached) : [];
+    let dealers = [];
+    if (cached) {
+      try {
+        dealers = JSON.parse(cached);
+      } catch (e) {
+        console.warn("Corrupted dealers cache in localStorage:", e);
+      }
+    }
     const index = dealers.findIndex((d: any) => d.mobile === dealer.mobile);
     if (index > -1) {
       dealers[index] = dealer;
@@ -350,7 +357,14 @@ export async function saveDealerToFirestore(dealer: { id: string; name: string; 
       console.warn("Firestore connection/write issue on dealer entity.", error);
       // Even if offline, write to local cache!
       const cached = localStorage.getItem('fieldconnect_dealers_cache');
-      const dealers = cached ? JSON.parse(cached) : [];
+      let dealers = [];
+      if (cached) {
+        try {
+          dealers = JSON.parse(cached);
+        } catch (e) {
+          console.warn("Corrupted dealers cache in localStorage:", e);
+        }
+      }
       const index = dealers.findIndex((d: any) => d.mobile === dealer.mobile);
       if (index > -1) {
         dealers[index] = dealer;
@@ -369,8 +383,14 @@ export async function deleteDealerFromFirestore(mobile: string): Promise<void> {
     await deleteDoc(doc(db, 'dealers', cleanId));
     const cached = localStorage.getItem('fieldconnect_dealers_cache');
     if (cached) {
-      const dealers = JSON.parse(cached).filter((d: any) => d.mobile !== mobile);
-      localStorage.setItem('fieldconnect_dealers_cache', JSON.stringify(dealers));
+      let dealers = [];
+      try {
+        dealers = JSON.parse(cached);
+      } catch (e) {
+        console.warn("Corrupted dealers cache in localStorage:", e);
+      }
+      const filteredDealers = dealers.filter((d: any) => d.mobile !== mobile);
+      localStorage.setItem('fieldconnect_dealers_cache', JSON.stringify(filteredDealers));
     }
   } catch (error) {
     if (isPermissionError(error)) {
@@ -408,7 +428,13 @@ export async function getAllDealers(): Promise<{ id: string; name: string; deale
       console.warn("Firestore collection get issue for dealers. Returning cached.", error);
     }
     const cached = localStorage.getItem('fieldconnect_dealers_cache');
-    return cached ? JSON.parse(cached) : [];
+    if (!cached) return [];
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      console.warn("Corrupted dealers cache in localStorage:", e);
+      return [];
+    }
   }
 }
 

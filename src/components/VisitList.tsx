@@ -29,6 +29,7 @@ import {
 import { SiteVisit, BuildingStatusOption } from '../types';
 import VisitMiniMap from './VisitMiniMap';
 import { exportToCsv } from '../utils/fileExporter';
+import { shareVisitDetails } from '../utils/shareUtils';
 
 // Helper to open URLs externally in Capacitor or native contexts gracefully
 const openExternalUrl = (url: string) => {
@@ -799,6 +800,28 @@ export default function VisitList({ visits, onDelete, onEdit }: VisitListProps) 
                   >
                     <Compass size={13} className="text-indigo-500 animate-spin-slow" />
                     <span>Navigate GPS</span>
+                  </button>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const mapUrl = visit.latitude && visit.longitude 
+                        ? `https://www.google.com/maps?q=${visit.latitude},${visit.longitude}`
+                        : `https://www.google.com/maps?q=${encodeURIComponent(visit.address)}`;
+                      
+                      shareVisitDetails({
+                        title: 'Site Location',
+                        text: `*Client Site Location Details*\n\n*Client:* ${visit.clientName}\n*Address:* ${visit.address}`,
+                        url: mapUrl,
+                        photo: visit.photo
+                      });
+                    }}
+                    className="text-emerald-700 hover:text-emerald-900 border border-emerald-200 hover:border-emerald-300 bg-white shadow-xs px-3 py-1.5 rounded-md font-bold transition flex items-center gap-1.5 cursor-pointer font-sans"
+                    id={`btn-share-location-${visit.id}`}
+                    title="Share site location with details and photo"
+                  >
+                    <Share2 size={13} className="text-emerald-500" />
+                    <span>Share Location</span>
                   </button>
 
                   <div className="flex items-center gap-1">
