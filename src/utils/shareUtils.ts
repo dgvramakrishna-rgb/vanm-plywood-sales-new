@@ -10,9 +10,10 @@ interface ShareData {
   text: string;
   url?: string;
   photo?: string;
+  photoOnly?: boolean;
 }
 
-export async function shareVisitDetails({ title, text, url, photo }: ShareData) {
+export async function shareVisitDetails({ title, text, url, photo, photoOnly }: ShareData) {
   try {
     const whatsappText = `${text}${url ? '\n\nMap Link: ' + url : ''}`;
     
@@ -25,20 +26,28 @@ export async function shareVisitDetails({ title, text, url, photo }: ShareData) 
       // Capacitor needs a file path or URI for sharing files
       if (photo && photo.startsWith('data:')) {
         try {
-          const fileName = `site_share_${Date.now()}.jpg`;
-          const base64Data = photo.split(',')[1];
+          const fileName = `site_photo_${Date.now()}.jpg`;
+          const base64Data = photo.includes(',') ? photo.split(',')[1] : photo;
           
-          const savedFile = await Filesystem.writeFile({
+          await Filesystem.writeFile({
             path: fileName,
             data: base64Data,
             directory: Directory.Cache,
-            // @ts-ignore - some capacitor versions use lowercase or string literal
+            // @ts-ignore
             encoding: 'base64'
           });
           
-          shareOptions.files = [savedFile.uri];
-          // On Android, sometimes including both files and URL/text works better if text contains the URL
-          // Some apps might not handle 'url' param well when files are present
+          const fileUri = await Filesystem.getUri({
+            path: fileName,
+            directory: Directory.Cache
+          });
+          
+          shareOptions.files = [fileUri.uri];
+          
+          if (photoOnly) {
+            delete shareOptions.text;
+            delete shareOptions.title;
+          }
         } catch (e) {
           console.warn('Capacitor: Failed to save photo for sharing:', e);
         }
@@ -65,6 +74,11 @@ export async function shareVisitDetails({ title, text, url, photo }: ShareData) 
           
           if (navigator.canShare && navigator.canShare({ files: [file] })) {
             shareParams.files = [file];
+            
+            if (photoOnly) {
+              delete shareParams.text;
+              delete shareParams.title;
+            }
           }
         } catch (e) {
           console.warn('Web: Failed to prepare photo for sharing:', e);

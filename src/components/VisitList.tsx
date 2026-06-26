@@ -30,6 +30,7 @@ import { SiteVisit, BuildingStatusOption } from '../types';
 import VisitMiniMap from './VisitMiniMap';
 import { exportToCsv } from '../utils/fileExporter';
 import { shareVisitDetails } from '../utils/shareUtils';
+import { SitePhotoItem } from './SitePhotoItem';
 
 // Helper to open URLs externally in Capacitor or native contexts gracefully
 const openExternalUrl = (url: string) => {
@@ -113,6 +114,8 @@ export default function VisitList({ visits, onDelete, onEdit }: VisitListProps) 
         v.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (v.contractorName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         v.clientMobile.includes(searchTerm) ||
+        (v.pincode && v.pincode.includes(searchTerm)) ||
+        (v.location && v.location.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (v.notes && v.notes.toLowerCase().includes(searchTerm.toLowerCase()));
 
       const matchesLead = leadFilter === 'all' || v.leadStatus === leadFilter;
@@ -298,23 +301,32 @@ export default function VisitList({ visits, onDelete, onEdit }: VisitListProps) 
           </div>
         </div>
 
-        {/* Filters Panel layout */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5">
-          {/* Text search */}
-          <div className="relative">
-            <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 text-slate-400">
-              <Search size={14} />
-            </span>
-            <input
-              type="text"
-              placeholder="Search clients, address, notes..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-8.5 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 transition"
-              id="search-input"
-            />
-          </div>
+        {/* Primary Search Bar */}
+        <div className="relative">
+          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+            <Search size={16} />
+          </span>
+          <input
+            type="text"
+            placeholder="Search by client name, mobile number, address, or notes..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-10 py-2.5 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 transition shadow-sm"
+            id="search-input"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 transition cursor-pointer"
+              title="Clear search"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
 
+        {/* Filters Panel layout */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2.5">
           {/* Lead priority filter */}
           <div className="relative">
             <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 text-slate-400">
@@ -607,25 +619,13 @@ export default function VisitList({ visits, onDelete, onEdit }: VisitListProps) 
                 <div className="flex border-b border-slate-100 p-5 gap-4 items-start">
                   
                   {/* Photo & Video representation */}
-                  <div className="flex flex-col gap-2 flex-shrink-0">
-                    {visit.photo ? (
-                      <div 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedImage(visit.photo);
-                        }}
-                        className="relative w-16 h-16 md:w-20 md:h-20 rounded-xl overflow-hidden shadow-inner cursor-zoom-in group bg-slate-50 border border-slate-100"
-                        title="Enlarge Site Photo"
-                      >
-                        <img src={visit.photo} alt={visit.clientName} className="w-full h-full object-cover group-hover:scale-105 duration-200" />
-                        <span className="absolute bottom-1 right-1 bg-slate-900/80 text-[8px] text-white px-1 py-0.5 rounded font-bold uppercase tracking-wider font-sans">
-                          Photo
-                        </span>
-                        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition duration-200 flex items-center justify-center text-white">
-                          <Maximize2 size={12} />
-                        </div>
-                      </div>
-                    ) : null}
+                    <div className="flex flex-col gap-2 flex-shrink-0">
+                      {visit.photo ? (
+                        <SitePhotoItem 
+                          visit={visit} 
+                          onEnlarge={setSelectedImage} 
+                        />
+                      ) : null}
 
                     {!visit.photo ? (
                       <div className="w-16 h-16 md:w-20 md:h-20 rounded-xl bg-slate-100 flex flex-col items-center justify-center text-slate-400 border border-slate-150">
@@ -676,8 +676,21 @@ export default function VisitList({ visits, onDelete, onEdit }: VisitListProps) 
                     <p className="text-slate-700 font-sans leading-relaxed font-medium">{visit.address}</p>
                     {visit.location && (
                       <p className="text-[11px] text-indigo-755 font-sans mt-1">
-                        <span className="font-extrabold text-[9px] uppercase font-mono text-slate-400 tracking-wider">Location / Area:</span>{" "}
+                        <span className="font-extrabold text-[9px] uppercase font-mono text-slate-400 tracking-wider">Location:</span>{" "}
                         <span className="font-semibold text-slate-755">{visit.location}</span>
+                        {visit.pincode && (
+                          <>
+                            <span className="mx-1 text-slate-300">|</span>
+                            <span className="font-extrabold text-[9px] uppercase font-mono text-slate-400 tracking-wider">Pin:</span>{" "}
+                            <span className="font-semibold text-slate-755">{visit.pincode}</span>
+                          </>
+                        )}
+                      </p>
+                    )}
+                    {!visit.location && visit.pincode && (
+                      <p className="text-[11px] text-indigo-755 font-sans mt-1">
+                        <span className="font-extrabold text-[9px] uppercase font-mono text-slate-400 tracking-wider">Pincode:</span>{" "}
+                        <span className="font-semibold text-slate-755">{visit.pincode}</span>
                       </p>
                     )}
                     {visit.latitude && visit.longitude && (
@@ -811,7 +824,7 @@ export default function VisitList({ visits, onDelete, onEdit }: VisitListProps) 
                       
                       shareVisitDetails({
                         title: 'Site Location',
-                        text: `*Client Site Location Details*\n\n*Client:* ${visit.clientName}\n*Address:* ${visit.address}`,
+                        text: `*Client Site Location Details*\n\n*Client:* ${visit.clientName}\n*Mobile:* ${visit.clientMobile}\n*Address:* ${visit.address}`,
                         url: mapUrl,
                         photo: visit.photo
                       });
@@ -995,13 +1008,17 @@ export default function VisitList({ visits, onDelete, onEdit }: VisitListProps) 
                   </div>
 
                   {/* Landmark & Area section */}
-                  <div className="grid grid-cols-2 gap-3 pt-2.5 border-t border-slate-100/70 text-xs text-slate-755">
+                  <div className="grid grid-cols-3 gap-3 pt-2.5 border-t border-slate-100/70 text-xs text-slate-755">
                      <div>
-                       <span className="text-[9px] font-extrabold text-slate-400 font-mono uppercase tracking-wider block font-sans">Location Area</span>
+                       <span className="text-[9px] font-extrabold text-slate-400 font-mono uppercase tracking-wider block font-sans">Area</span>
                        <span className="font-semibold text-slate-750 block mt-0.5">{selectedVisitForDetail.location || 'N/A'}</span>
                      </div>
                      <div>
-                       <span className="text-[9px] font-extrabold text-slate-400 font-mono uppercase tracking-wider block font-sans">Nearest Landmark</span>
+                       <span className="text-[9px] font-extrabold text-slate-400 font-mono uppercase tracking-wider block font-sans">Pincode</span>
+                       <span className="font-semibold text-slate-750 block mt-0.5">{selectedVisitForDetail.pincode || 'N/A'}</span>
+                     </div>
+                     <div>
+                       <span className="text-[9px] font-extrabold text-slate-400 font-mono uppercase tracking-wider block font-sans">Landmark</span>
                        <span className="font-semibold text-slate-750 block mt-0.5">{selectedVisitForDetail.nearestLandmark || 'N/A'}</span>
                      </div>
                   </div>

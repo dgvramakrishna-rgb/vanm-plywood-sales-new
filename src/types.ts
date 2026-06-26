@@ -34,6 +34,7 @@ export interface SiteVisit {
   notes?: string;
   customerNotAvailable?: boolean;
   nearestLandmark?: string;
+  pincode?: string;
   createdAt: string; // ISO String
   synced?: boolean;
 }

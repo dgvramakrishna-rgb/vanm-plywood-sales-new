@@ -38,12 +38,15 @@ import {
   Bell,
   BellOff,
   Info,
-  CheckSquare
+  CheckSquare,
+  Map as MapIcon
 } from 'lucide-react';
 import { SiteVisit, Dealer } from '../types';
 import { compressImage } from '../utils/imageCompressor';
 import { exportToCsv } from '../utils/fileExporter';
 import { shareVisitDetails } from '../utils/shareUtils';
+import { SitePhotoItem } from './SitePhotoItem';
+import SiteVisitsMap from './SiteVisitsMap';
 import { 
   requestNotificationPermission, 
   getNotificationPermissionStatus, 
@@ -103,7 +106,7 @@ export default function Dashboard({
   const todayStr = new Date().toISOString().split('T')[0];
   
   // Navigation tab state within the Home Page: overview, followups, reports, absent, places, dealers, completed, partners
-  const [activeHomeTab, setActiveHomeTab] = useState<'overview' | 'followups' | 'reports' | 'absent' | 'places' | 'dealers' | 'completed' | 'partners'>('overview');
+  const [activeHomeTab, setActiveHomeTab] = useState<'overview' | 'followups' | 'reports' | 'absent' | 'places' | 'dealers' | 'completed' | 'partners' | 'map'>('overview');
   const [placesFilter, setPlacesFilter] = useState<string>('');
   const [expandedPlaces, setExpandedPlaces] = useState<Record<string, boolean>>({});
   const [dealersSearchQuery, setDealersSearchQuery] = useState('');
@@ -589,7 +592,7 @@ export default function Dashboard({
 
   // Helper for determining human-friendly place of visit is changed to purely return the location name for location-wise grouping
   const getPlaceName = React.useCallback((v: SiteVisit) => {
-    return v.location?.trim() || v.address?.trim() || 'No Location Name';
+    return v.address?.trim() || v.location?.trim() || 'No Location Name';
   }, []);
 
   // Simple unique Places summary dataset
@@ -635,6 +638,7 @@ export default function Dashboard({
         p.visits.some(v => 
           v.clientName.toLowerCase().includes(query) || 
           (v.location && v.location.toLowerCase().includes(query)) ||
+          (v.pincode && v.pincode.toLowerCase().includes(query)) ||
           (v.carpenterName && v.carpenterName.toLowerCase().includes(query)) ||
           (v.interiorName && v.interiorName.toLowerCase().includes(query))
         )
@@ -1360,6 +1364,19 @@ Report generated locally from zone sync.`;
           </button>
 
           <button
+            onClick={() => setActiveHomeTab('map')}
+            className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition cursor-pointer font-sans ${
+              activeHomeTab === 'map'
+                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+            id="opt-tab-map"
+          >
+            <MapIcon size={12} className="text-blue-500" />
+            <span>🗺️ Site Map</span>
+          </button>
+
+          <button
             onClick={() => setActiveHomeTab('reports')}
             className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition cursor-pointer font-sans ${
               activeHomeTab === 'reports'
@@ -1548,6 +1565,38 @@ Report generated locally from zone sync.`;
             </motion.div>
           )}
         </>
+      )}
+
+      {activeHomeTab === 'map' && (
+        <div className="space-y-4 animate-fade-in" id="site-map-view">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+            <div className="p-4 bg-indigo-600 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+              <div className="space-y-0.5">
+                <h2 className="text-base font-extrabold tracking-tight flex items-center gap-2">
+                  <MapIcon size={18} />
+                  <span>Site Geolocation Intelligence</span>
+                </h2>
+                <p className="text-[10px] text-indigo-100 font-medium opacity-90">
+                  Visualizing client sites across the region with 5km coverage radius analysis
+                </p>
+              </div>
+              <div className="flex items-center gap-4 text-[10px] font-bold">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 border border-white"></span>
+                  <span>Hot Leads</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-indigo-400 border border-white"></span>
+                  <span>Regular Sites</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="relative h-[650px] w-full">
+              <SiteVisitsMap visits={visits} />
+            </div>
+          </div>
+        </div>
       )}
 
       {activeHomeTab === 'followups' && (
@@ -4053,60 +4102,70 @@ Report generated locally from zone sync.`;
                         }}
                         className="w-full py-2 bg-indigo-50 border border-indigo-100/80 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer"
                       >
-                        👥 {expandedPlaces[place.placeName] ? 'Hide Client Details' : `View City-wise Clients (${place.visits.length})`}
+                        👥 {expandedPlaces[place.placeName] ? 'Hide Pincode Details' : `View Pincode-wise Clients (${place.visits.length})`}
                       </button>
 
                       {expandedPlaces[place.placeName] && (
                         <div className="mt-4 pt-4 border-t border-slate-100 space-y-4 font-sans animate-fade-in">
-                          <p className="text-[10px] font-extrabold text-slate-450 font-mono tracking-wider uppercase">Associated Customer Sites (City/Village-wise)</p>
+                          <p className="text-[10px] font-extrabold text-slate-450 font-mono tracking-wider uppercase">Associated Groups (Pincode-wise)</p>
                           <div className="space-y-4 max-h-[420px] overflow-y-auto pr-1">
                             {(() => {
-                              // Group visits of this location by v.address (City/Village)
+                              // Group visits of this city by v.pincode
                               const grouped: Record<string, SiteVisit[]> = {};
                               place.visits.forEach(visit => {
-                                const cityKey = (visit.address || 'Central City / Main Village').trim();
-                                if (!grouped[cityKey]) {
-                                  grouped[cityKey] = [];
+                                const pinKey = (visit.pincode || 'No Pincode').trim();
+                                if (!grouped[pinKey]) {
+                                  grouped[pinKey] = [];
                                 }
-                                grouped[cityKey].push(visit);
+                                grouped[pinKey].push(visit);
                               });
 
-                              return Object.entries(grouped).map(([cityName, cityVisits]) => (
-                                <div key={cityName} className="space-y-2.5 border-l-2 border-emerald-500 pl-3">
-                                  <div className="flex items-center gap-1.5 text-[9.5px] font-black text-emerald-700 font-mono tracking-wider uppercase bg-emerald-50/70 py-1 px-2.5 rounded-lg border border-emerald-100/40 inline-flex">
-                                    <span>🏢 {cityName}</span>
-                                    <span className="bg-emerald-100 text-emerald-800 rounded-full h-4 min-w-4 px-1 flex items-center justify-center text-[9px] font-bold shrink-0">{cityVisits.length}</span>
+                              return Object.entries(grouped).map(([pinCode, pinVisits]) => (
+                                <div key={pinCode} className="space-y-2.5 border-l-2 border-indigo-500 pl-3">
+                                  <div className="flex items-center gap-1.5 text-[9.5px] font-black text-indigo-700 font-mono tracking-wider uppercase bg-indigo-50/70 py-1 px-2.5 rounded-lg border border-indigo-100/40 inline-flex">
+                                    <span>📮 Pin: {pinCode}</span>
+                                    <span className="bg-indigo-100 text-indigo-800 rounded-full h-4 min-w-4 px-1 flex items-center justify-center text-[9px] font-bold shrink-0">{pinVisits.length}</span>
                                   </div>
                                   <div className="space-y-3">
-                                    {cityVisits.map((visit, vIdx) => {
+                                    {pinVisits.map((visit, vIdx) => {
                                       const vPhone = visit.clientMobile || '';
                                       const hasVPhone = vPhone && vPhone !== '0000000000';
                                       const cleanVPhone = vPhone.replace(/\D/g, '').length === 10 ? '91' + vPhone.replace(/\D/g, '') : vPhone.replace(/\D/g, '');
                                       return (
                                         <div key={vIdx} className="bg-slate-50/60 hover:bg-slate-50 border border-slate-150 rounded-xl p-3.5 space-y-3 transition shadow-3xs text-left">
                                           <div className="flex justify-between items-start gap-2">
-                                            <div className="min-w-0 flex-1">
-                                              <h4 className="text-xs font-black text-slate-850 leading-tight">{visit.clientName}</h4>
-                                              <div className="flex flex-wrap gap-1 mt-1.5">
-                                                {visit.buildingType && (
-                                                  <span className="text-[8.5px] uppercase font-mono px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100/30">
-                                                    🏢 {visit.buildingType}
-                                                  </span>
-                                                )}
-                                                {visit.buildingStatus && (
-                                                  <span className="text-[8.5px] uppercase font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100/30">
-                                                    🔨 {visit.buildingStatus}
-                                                  </span>
-                                                )}
-                                                {visit.leadStatus && (
-                                                  <span className={`text-[8.5px] uppercase font-mono px-1.5 py-0.5 rounded border ${
-                                                    visit.leadStatus === 'hot' 
-                                                      ? 'bg-rose-50 text-rose-700 border-rose-100/50 font-bold' 
-                                                      : 'bg-slate-100 text-slate-550 border-slate-200/50'
-                                                  }`}>
-                                                    🔥 {visit.leadStatus === 'hot' ? 'HOT LEAD' : 'COLD'}
-                                                  </span>
-                                                )}
+                                            <div className="flex gap-3 min-w-0 flex-1">
+                                              {visit.photo && (
+                                                <SitePhotoItem 
+                                                  visit={visit} 
+                                                  onEnlarge={setSelectedImage}
+                                                  className="w-14 h-14 rounded-lg overflow-hidden border border-slate-200 flex-shrink-0 relative group/img cursor-zoom-in"
+                                                  imageClassName="w-full h-full object-cover"
+                                                />
+                                              )}
+                                              <div className="min-w-0 flex-1">
+                                                <h4 className="text-xs font-black text-slate-850 leading-tight">{visit.clientName}</h4>
+                                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                                  {visit.buildingType && (
+                                                    <span className="text-[8.5px] uppercase font-mono px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100/30">
+                                                      🏢 {visit.buildingType}
+                                                    </span>
+                                                  )}
+                                                  {visit.buildingStatus && (
+                                                    <span className="text-[8.5px] uppercase font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100/30">
+                                                      🔨 {visit.buildingStatus}
+                                                    </span>
+                                                  )}
+                                                  {visit.leadStatus && (
+                                                    <span className={`text-[8.5px] uppercase font-mono px-1.5 py-0.5 rounded border ${
+                                                      visit.leadStatus === 'hot' 
+                                                        ? 'bg-rose-50 text-rose-700 border-rose-100/50 font-bold' 
+                                                        : 'bg-slate-100 text-slate-550 border-slate-200/50'
+                                                    }`}>
+                                                      🔥 {visit.leadStatus === 'hot' ? 'HOT LEAD' : 'COLD'}
+                                                    </span>
+                                                  )}
+                                                </div>
                                               </div>
                                             </div>
                                             <span className="text-[9px] font-mono text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded shrink-0">
@@ -4568,9 +4627,12 @@ Report generated locally from zone sync.`;
                               <div key={i} className="text-[10px] bg-white border border-slate-200 p-3 rounded-xl shadow-sm space-y-2">
                                 <div className="flex gap-2">
                                   {v.photo && (
-                                    <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-100 flex-shrink-0">
-                                      <img src={v.photo} alt={v.clientName} className="w-full h-full object-cover" />
-                                    </div>
+                                    <SitePhotoItem 
+                                      visit={v} 
+                                      onEnlarge={setSelectedImage}
+                                      className="w-12 h-12 rounded-lg overflow-hidden border border-slate-100 flex-shrink-0 relative group/img cursor-zoom-in"
+                                      imageClassName="w-full h-full object-cover"
+                                    />
                                   )}
                                   <div className="min-w-0 flex-1">
                                     <h5 className="font-bold text-slate-900 truncate">{v.clientName}</h5>
@@ -4595,7 +4657,7 @@ Report generated locally from zone sync.`;
                                         
                                         shareVisitDetails({
                                           title: 'Customer Location',
-                                          text: `*Client Site Detail*\n\n*Client:* ${v.clientName}\n*Address:* ${v.address}`,
+                                          text: `*Client Site Detail*\n\n*Client:* ${v.clientName}\n*Mobile:* ${v.clientMobile}\n*Address:* ${v.address}`,
                                           url: mapUrl,
                                           photo: v.photo
                                         });
@@ -4648,9 +4710,12 @@ Report generated locally from zone sync.`;
                               <div key={i} className="text-[10px] bg-white border border-slate-200 p-3 rounded-xl shadow-sm space-y-2">
                                 <div className="flex gap-2">
                                   {v.photo && (
-                                    <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-100 flex-shrink-0">
-                                      <img src={v.photo} alt={v.clientName} className="w-full h-full object-cover" />
-                                    </div>
+                                    <SitePhotoItem 
+                                      visit={v} 
+                                      onEnlarge={setSelectedImage}
+                                      className="w-12 h-12 rounded-lg overflow-hidden border border-slate-100 flex-shrink-0 relative group/img cursor-zoom-in"
+                                      imageClassName="w-full h-full object-cover"
+                                    />
                                   )}
                                   <div className="min-w-0 flex-1">
                                     <h5 className="font-bold text-slate-900 truncate">{v.clientName}</h5>
@@ -4675,7 +4740,7 @@ Report generated locally from zone sync.`;
                                         
                                         shareVisitDetails({
                                           title: 'Customer Location',
-                                          text: `*Client Site Detail*\n\n*Client:* ${v.clientName}\n*Address:* ${v.address}`,
+                                          text: `*Client Site Detail*\n\n*Client:* ${v.clientName}\n*Mobile:* ${v.clientMobile}\n*Address:* ${v.address}`,
                                           url: mapUrl,
                                           photo: v.photo
                                         });
@@ -4728,9 +4793,12 @@ Report generated locally from zone sync.`;
                               <div key={i} className="text-[10px] bg-white border border-slate-200 p-3 rounded-xl shadow-sm space-y-2">
                                 <div className="flex gap-2">
                                   {v.photo && (
-                                    <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-100 flex-shrink-0">
-                                      <img src={v.photo} alt={v.clientName} className="w-full h-full object-cover" />
-                                    </div>
+                                    <SitePhotoItem 
+                                      visit={v} 
+                                      onEnlarge={setSelectedImage}
+                                      className="w-12 h-12 rounded-lg overflow-hidden border border-slate-100 flex-shrink-0 relative group/img cursor-zoom-in"
+                                      imageClassName="w-full h-full object-cover"
+                                    />
                                   )}
                                   <div className="min-w-0 flex-1">
                                     <h5 className="font-bold text-slate-900 truncate">{v.clientName}</h5>
@@ -4755,7 +4823,7 @@ Report generated locally from zone sync.`;
                                         
                                         shareVisitDetails({
                                           title: 'Customer Location',
-                                          text: `*Client Site Detail*\n\n*Client:* ${v.clientName}\n*Address:* ${v.address}`,
+                                          text: `*Client Site Detail*\n\n*Client:* ${v.clientName}\n*Mobile:* ${v.clientMobile}\n*Address:* ${v.address}`,
                                           url: mapUrl,
                                           photo: v.photo
                                         });
@@ -4808,9 +4876,12 @@ Report generated locally from zone sync.`;
                               <div key={i} className="text-[10px] bg-white border border-slate-200 p-3 rounded-xl shadow-sm space-y-2">
                                 <div className="flex gap-2">
                                   {v.photo && (
-                                    <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-100 flex-shrink-0">
-                                      <img src={v.photo} alt={v.clientName} className="w-full h-full object-cover" />
-                                    </div>
+                                    <SitePhotoItem 
+                                      visit={v} 
+                                      onEnlarge={setSelectedImage}
+                                      className="w-12 h-12 rounded-lg overflow-hidden border border-slate-100 flex-shrink-0 relative group/img cursor-zoom-in"
+                                      imageClassName="w-full h-full object-cover"
+                                    />
                                   )}
                                   <div className="min-w-0 flex-1">
                                     <h5 className="font-bold text-slate-900 truncate">{v.clientName}</h5>
@@ -4835,7 +4906,7 @@ Report generated locally from zone sync.`;
                                         
                                         shareVisitDetails({
                                           title: 'Customer Location',
-                                          text: `*Client Site Detail*\n\n*Client:* ${v.clientName}\n*Address:* ${v.address}`,
+                                          text: `*Client Site Detail*\n\n*Client:* ${v.clientName}\n*Mobile:* ${v.clientMobile}\n*Address:* ${v.address}`,
                                           url: mapUrl,
                                           photo: v.photo
                                         });

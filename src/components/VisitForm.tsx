@@ -55,6 +55,7 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
   });
   const [address, setAddress] = useState(initialData?.address || '');
   const [location, setLocation] = useState(initialData?.location || '');
+  const [pincode, setPincode] = useState(initialData?.pincode || '');
   const [latitude, setLatitude] = useState<number | null>(initialData?.latitude ?? null);
   const [longitude, setLongitude] = useState<number | null>(initialData?.longitude ?? null);
   const [photo, setPhoto] = useState<string | null>(initialData?.photo || null);
@@ -537,6 +538,10 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
               } else {
                 setLocation(`Lat ${lat.toFixed(4)}, Lng ${lng.toFixed(4)}`);
               }
+              
+              if (addressParts.postcode) {
+                setPincode(addressParts.postcode);
+              }
             } else {
               setAddress(`GPS Ref: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
               setLocation(`Lat ${lat.toFixed(4)}, Lng ${lng.toFixed(4)}`);
@@ -668,6 +673,7 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
       clientMobile: clientMobile.trim() || '0000000000',
       address: address.trim(),
       location: location.trim(),
+      pincode: pincode.trim(),
       latitude,
       longitude,
       photo,
@@ -959,6 +965,30 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
                 )}
               </AnimatePresence>
 
+              <AnimatePresence>
+                {!isLocating && locationStatus !== 'success' && !address && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className="mb-4"
+                  >
+                    <button
+                      type="button"
+                      onClick={handleDetectLocation}
+                      className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md hover:shadow-lg transition-all flex flex-col items-center justify-center gap-1 group cursor-pointer"
+                      id="btn-main-gps-detect"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Navigation size={18} className="group-hover:animate-bounce" />
+                        <span className="text-sm font-bold font-sans">Auto-Detect My Location (GPS)</span>
+                      </div>
+                      <span className="text-[10px] text-indigo-100 opacity-90 font-medium font-sans">Click to automatically fill City, Area, and Pincode</span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Site Address field */}
                 <div className="space-y-1.5" id="container-site-address">
@@ -1071,6 +1101,26 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
                       }}
                       className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 transition"
                       id="inp-location"
+                    />
+                  </div>
+                </div>
+
+                {/* Pincode field */}
+                <div className="space-y-1.5">
+                  <p className="block text-xs font-semibold text-slate-650 font-sans">
+                    Pincode / Postal Code <span className="text-slate-400 font-normal italic lowercase">(Optional)</span>
+                  </p>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                      <MapPin size={16} />
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="e.g. 521101"
+                      value={pincode}
+                      onChange={(e) => setPincode(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 transition"
+                      id="inp-pincode"
                     />
                   </div>
                 </div>
