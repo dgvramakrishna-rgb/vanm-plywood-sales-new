@@ -194,6 +194,25 @@ export default function App() {
     }, 1500);
   };
 
+  const handleBackupData = () => {
+    try {
+      const dataStr = JSON.stringify(visits, null, 2);
+      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+      
+      const exportFileDefaultName = `fieldconnect_backup_${new Date().toISOString().split('T')[0]}.json`;
+      
+      const linkElement = document.createElement('a');
+      linkElement.setAttribute('href', dataUri);
+      linkElement.setAttribute('download', exportFileDefaultName);
+      linkElement.click();
+      
+      triggerToast('Backup JSON downloaded successfully!', 'success');
+    } catch (err) {
+      console.error('Backup failed:', err);
+      triggerToast('Failed to generate backup file.', 'info');
+    }
+  };
+
   // Load visits on startup
   useEffect(() => {
     async function loadData() {
@@ -717,6 +736,26 @@ export default function App() {
                             <span>🌙 Dark</span>
                           </button>
                         </div>
+                      </div>
+
+                      {/* Backup Data Action */}
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={handleBackupData}
+                          className="w-full flex items-center justify-between px-3 py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-slate-850 dark:hover:bg-slate-800 border border-indigo-100 dark:border-slate-800 rounded-xl transition cursor-pointer group"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="p-1.5 bg-white dark:bg-slate-900 rounded-lg shadow-sm text-indigo-600 dark:text-indigo-400">
+                              <Download size={14} />
+                            </div>
+                            <div className="text-left">
+                              <span className="block text-xs font-bold text-slate-800 dark:text-slate-200">Backup Data</span>
+                              <span className="block text-[9px] text-slate-500 font-medium leading-none mt-0.5">Export all records as JSON</span>
+                            </div>
+                          </div>
+                          <span className="text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity text-[10px]">➔</span>
+                        </button>
                       </div>
 
                     </div>

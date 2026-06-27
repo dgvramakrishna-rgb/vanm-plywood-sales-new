@@ -799,11 +799,12 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
                     id="inp-building-type"
                     value={buildingType}
                     onChange={(e) => setBuildingType(e.target.value)}
-                    className="w-full pl-9 pr-10 py-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 transition appearance-none cursor-pointer font-medium text-slate-800"
+                    className="w-full pl-9 pr-10 py-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 transition appearance-none cursor-pointer font-medium text-slate-800 interactive-highlight"
                     required
                   >
                     <option value="Home">🏠 Home</option>
                     <option value="Apartment">🏢 Apartment</option>
+                    <option value="Villas">🏘️ Villa</option>
                     <option value="Duplex">🏡 Duplex</option>
                     <option value="Shop">🏬 Shop</option>
                   </select>

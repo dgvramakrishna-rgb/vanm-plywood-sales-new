@@ -39,7 +39,8 @@ import {
   BellOff,
   Info,
   CheckSquare,
-  Map as MapIcon
+  Map as MapIcon,
+  Layers
 } from 'lucide-react';
 import { SiteVisit, Dealer } from '../types';
 import { compressImage } from '../utils/imageCompressor';
@@ -47,6 +48,7 @@ import { exportToCsv } from '../utils/fileExporter';
 import { shareVisitDetails } from '../utils/shareUtils';
 import { SitePhotoItem } from './SitePhotoItem';
 import SiteVisitsMap from './SiteVisitsMap';
+import SiteVisitsOSMMap from './SiteVisitsOSMMap';
 import { 
   requestNotificationPermission, 
   getNotificationPermissionStatus, 
@@ -107,6 +109,7 @@ export default function Dashboard({
   
   // Navigation tab state within the Home Page: overview, followups, reports, absent, places, dealers, completed, partners
   const [activeHomeTab, setActiveHomeTab] = useState<'overview' | 'followups' | 'reports' | 'absent' | 'places' | 'dealers' | 'completed' | 'partners' | 'map'>('overview');
+  const [mapType, setMapType] = useState<'google' | 'osm'>('google');
   const [placesFilter, setPlacesFilter] = useState<string>('');
   const [expandedPlaces, setExpandedPlaces] = useState<Record<string, boolean>>({});
   const [dealersSearchQuery, setDealersSearchQuery] = useState('');
@@ -1488,7 +1491,7 @@ Report generated locally from zone sync.`;
           {/* KPI Stats Widgets Grid */}
           <div className="grid grid-cols-1 min-[380px]:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" id="stats-widgets">
             {/* Total Visits widget */}
-            <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm flex items-center justify-between transition hover:shadow-md hover:border-slate-300">
+            <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm flex items-center justify-between transition hover:shadow-md hover:border-slate-300 interactive-highlight">
               <div className="space-y-0.5">
                 <span className="text-[9px] text-slate-600 font-bold uppercase tracking-wider font-mono">Total Sites Visited</span>
                 <div className="text-xl sm:text-2xl font-extrabold text-slate-900 font-display">{totalVisits}</div>
@@ -1500,7 +1503,7 @@ Report generated locally from zone sync.`;
             </div>
 
             {/* Hot Leads widget */}
-            <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm flex items-center justify-between transition hover:shadow-md hover:border-slate-300">
+            <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm flex items-center justify-between transition hover:shadow-md hover:border-slate-300 interactive-highlight">
               <div className="space-y-0.5">
                 <span className="text-[9px] text-orange-600 font-bold uppercase tracking-wider font-mono">🔥 Hot Leads</span>
                 <div className="text-xl sm:text-2xl font-extrabold text-orange-600 font-display">{hotLeads}</div>
@@ -1512,7 +1515,7 @@ Report generated locally from zone sync.`;
             </div>
 
             {/* Cold Leads widget */}
-            <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm flex items-center justify-between transition hover:shadow-md hover:border-slate-300">
+            <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm flex items-center justify-between transition hover:shadow-md hover:border-slate-300 interactive-highlight">
               <div className="space-y-0.5">
                 <span className="text-[9px] text-indigo-600 font-bold uppercase tracking-wider font-mono">❄️ Cold Leads</span>
                 <div className="text-xl sm:text-2xl font-extrabold text-indigo-600 font-display">{coldLeads}</div>
@@ -1524,7 +1527,7 @@ Report generated locally from zone sync.`;
             </div>
 
             {/* Visits Today goal tracking widget */}
-            <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm flex items-center justify-between transition hover:shadow-md hover:border-slate-300">
+            <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm flex items-center justify-between transition hover:shadow-md hover:border-slate-300 interactive-highlight">
               <div className="space-y-0.5 flex-1">
                 <span className="text-[9px] text-teal-600 font-bold uppercase tracking-wider font-mono">Visits Today</span>
                 <div className="flex items-baseline gap-1">
@@ -1580,20 +1583,55 @@ Report generated locally from zone sync.`;
                   Visualizing client sites across the region with 5km coverage radius analysis
                 </p>
               </div>
-              <div className="flex items-center gap-4 text-[10px] font-bold">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-rose-500 border border-white"></span>
-                  <span>Hot Leads</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-indigo-400 border border-white"></span>
-                  <span>Regular Sites</span>
-                </div>
+              
+              <div className="flex items-center gap-2 p-1 bg-indigo-700/50 rounded-xl border border-indigo-500/30">
+                <button
+                  onClick={() => setMapType('google')}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1.5 ${
+                    mapType === 'google' 
+                      ? 'bg-white text-indigo-700 shadow-sm' 
+                      : 'text-indigo-100 hover:bg-indigo-600'
+                  }`}
+                >
+                  <MapIcon size={12} />
+                  Google Maps
+                </button>
+                <button
+                  onClick={() => setMapType('osm')}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1.5 ${
+                    mapType === 'osm' 
+                      ? 'bg-white text-indigo-700 shadow-sm' 
+                      : 'text-indigo-100 hover:bg-indigo-600'
+                  }`}
+                >
+                  <Layers size={12} />
+                  OpenStreetMap
+                </button>
               </div>
             </div>
             
             <div className="relative h-[650px] w-full">
-              <SiteVisitsMap visits={visits} />
+              {mapType === 'google' ? (
+                <SiteVisitsMap 
+                  visits={visits} 
+                  onEditVisit={onEditVisit}
+                  onCompleteVisit={async (visit) => {
+                    if (onToggleCompleteCustomer) {
+                      await onToggleCompleteCustomer(visit.clientMobile, true);
+                    }
+                  }}
+                />
+              ) : (
+                <SiteVisitsOSMMap 
+                  visits={visits} 
+                  onEditVisit={onEditVisit}
+                  onCompleteVisit={async (visit) => {
+                    if (onToggleCompleteCustomer) {
+                      await onToggleCompleteCustomer(visit.clientMobile, true);
+                    }
+                  }}
+                />
+              )}
             </div>
           </div>
         </div>
