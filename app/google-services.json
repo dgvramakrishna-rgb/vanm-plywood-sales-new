@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "241119232425",
+    "project_id": "zeta-diagram-sx6pd",
+    "storage_bucket": "zeta-diagram-sx6pd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:241119232425:android:7ea62c9ae960173fc344b8",
+        "android_client_info": {
+          "package_name": "com.salesvisits.tracker"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "241119232425-kt8kdn1h1pekjkd4rdvrjq9vbkeug0bs.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.salesvisits.tracker",
+            "certificate_hash": "0000000000000000000000000000000000000000"
+          }
+        },
+        {
+          "client_id": "241119232425-j3fkkiuripl117frfkn94mgr6o5tnh3a.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB8VlDbwEVexGnxQKpeUepjPBDaJTrLbN8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "241119232425-j3fkkiuripl117frfkn94mgr6o5tnh3a.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
