@@ -12,7 +12,7 @@ import { SiteVisit } from './types';
 
 const DB_NAME = 'SalesTrackerDB';
 const STORE_NAME = 'visits';
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 
 // --- Utility for Firestore Serialization ---
 
@@ -47,7 +47,7 @@ export function sanitizeDocId(mobile: string): string {
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    let request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = (event) => {
       const db = request.result;
@@ -61,7 +61,33 @@ function openDB(): Promise<IDBDatabase> {
     };
 
     request.onerror = () => {
-      reject(request.error);
+      const error = request.error;
+      if (error && error.name === 'VersionError') {
+        console.warn(`IndexedDB version mismatch (requested ${DB_VERSION}). Deleting and recreating database...`);
+        const deleteRequest = indexedDB.deleteDatabase(DB_NAME);
+        
+        deleteRequest.onsuccess = () => {
+          const reopenRequest = indexedDB.open(DB_NAME, DB_VERSION);
+          reopenRequest.onupgradeneeded = () => {
+            const db = reopenRequest.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+              db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+            }
+          };
+          reopenRequest.onsuccess = () => {
+            resolve(reopenRequest.result);
+          };
+          reopenRequest.onerror = () => {
+            reject(reopenRequest.error);
+          };
+        };
+        
+        deleteRequest.onerror = () => {
+          reject(error);
+        };
+      } else {
+        reject(error);
+      }
     };
   });
 }

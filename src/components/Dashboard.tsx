@@ -46,6 +46,7 @@ import { SiteVisit, Dealer } from '../types';
 import { compressImage } from '../utils/imageCompressor';
 import { exportToCsv } from '../utils/fileExporter';
 import { shareVisitDetails } from '../utils/shareUtils';
+import { calculateDistance } from '../utils/geoUtils';
 import { SitePhotoItem } from './SitePhotoItem';
 import SiteVisitsMap from './SiteVisitsMap';
 import SiteVisitsOSMMap from './SiteVisitsOSMMap';
@@ -110,9 +111,9 @@ export default function Dashboard({
   // Navigation tab state within the Home Page: overview, followups, reports, absent, places, dealers, completed, partners
   const [activeHomeTab, setActiveHomeTab] = useState<'overview' | 'followups' | 'reports' | 'absent' | 'places' | 'dealers' | 'completed' | 'partners' | 'map'>('overview');
   const [mapType, setMapType] = useState<'google' | 'osm'>('google');
-  const [placesFilter, setPlacesFilter] = useState<string>('');
-  const [expandedPlaces, setExpandedPlaces] = useState<Record<string, boolean>>({});
   const [dealersSearchQuery, setDealersSearchQuery] = useState('');
+  const [completedSearchQuery, setCompletedSearchQuery] = useState('');
+  const [placesSearchQuery, setPlacesSearchQuery] = useState('');
   
   // States for registering dealers
   const [dealerName, setDealerName] = useState('');
@@ -204,6 +205,13 @@ export default function Dashboard({
     return localStorage.getItem('vanmply_show_notification_center') === 'true';
   });
 
+  // Proximity Notification State
+  const [notifiedSiteIds, setNotifiedSiteIds] = useState<Set<string>>(new Set());
+  const [currentDistanceToNearest, setCurrentDistanceToNearest] = useState<{ id: string; name: string; distance: number } | null>(null);
+  const [isProximityAlertEnabled, setIsProximityAlertEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('vanmply_proximity_alerts') !== 'false';
+  });
+
   // Load and check notification permission status on component mount
   React.useEffect(() => {
     const checkStatus = async () => {
@@ -212,6 +220,59 @@ export default function Dashboard({
     };
     checkStatus();
   }, []);
+
+  // Proximity Location Tracking Effect
+  React.useEffect(() => {
+    if (!isProximityAlertEnabled || !navigator.geolocation) return;
+
+    // Request notification permission if not granted
+    if (notificationPermission === 'default') {
+      requestNotificationPermission().then(status => setNotificationPermission(status));
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const { latitude: userLat, longitude: userLon } = position.coords;
+        let nearest: { id: string; name: string; distance: number } | null = null;
+
+        visits.forEach(visit => {
+          if (!visit.latitude || !visit.longitude || visit.isCompleted) return;
+
+          const distance = calculateDistance(userLat, userLon, visit.latitude, visit.longitude);
+          
+          // Check if within 100 meters
+          if (distance <= 100 && !notifiedSiteIds.has(visit.id)) {
+            sendLocalNotification(
+              '📍 Arrival: Nearby Client Site',
+              `${visit.clientName} is ${Math.round(distance)}m from your current location.`
+            );
+            setNotifiedSiteIds(prev => new Set(prev).add(visit.id));
+            
+            if (onTriggerToast) {
+              onTriggerToast(`📍 Arrival: ${visit.clientName} is ${Math.round(distance)}m away!`, 'info');
+            }
+          }
+
+          // Track nearest for UI display
+          if (!nearest || distance < nearest.distance) {
+            nearest = { id: visit.id, name: visit.clientName, distance };
+          }
+        });
+
+        setCurrentDistanceToNearest(nearest);
+      },
+      (error) => {
+        console.warn("Proximity tracking error:", error.message);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [isProximityAlertEnabled, visits, notifiedSiteIds, notificationPermission, onTriggerToast]);
 
   // Proactive automatic notification reminders on login / app open
   React.useEffect(() => {
@@ -614,42 +675,33 @@ export default function Dashboard({
         };
       }
       
-      // Store the actual visit detail
       placeMap[placeName].visits.push(v);
-
-      // Increment clientCount (each visiting log is a client visit)
       placeMap[placeName].clientCount += 1;
       
-      // Carpenter logic: check if carpenter details exist for this visit
       if (v.carpenterName || v.carpenterMobile) {
         placeMap[placeName].carpenterCount += 1;
       }
       
-      // Interior designer logic: check if interior details exist for this visit
       if (v.interiorName || v.interiorMobile) {
         placeMap[placeName].interiorCount += 1;
       }
     });
 
-    const list = Object.values(placeMap);
+    let list = Object.values(placeMap);
 
-    // Filter places with search filter
-    if (placesFilter) {
-      const query = placesFilter.toLowerCase();
-      return list.filter(p => 
+    if (placesSearchQuery) {
+      const query = placesSearchQuery.toLowerCase();
+      list = list.filter(p => 
         p.placeName.toLowerCase().includes(query) || 
         p.visits.some(v => 
           v.clientName.toLowerCase().includes(query) || 
-          (v.location && v.location.toLowerCase().includes(query)) ||
-          (v.pincode && v.pincode.toLowerCase().includes(query)) ||
-          (v.carpenterName && v.carpenterName.toLowerCase().includes(query)) ||
-          (v.interiorName && v.interiorName.toLowerCase().includes(query))
+          (v.address && v.address.toLowerCase().includes(query))
         )
       );
     }
 
     return list;
-  }, [visits, placesFilter, getPlaceName]);
+  }, [visits, placesSearchQuery, getPlaceName]);
 
   // Simple follow-up count badge logic: count only visits with a manually-set nextFollowUpDate
   const totalRemindersCount = visits.filter(v => v.nextFollowUpDate).length;
@@ -1025,40 +1077,57 @@ export default function Dashboard({
       return list;
     };
 
-    // 1. SECONDARY CUSTOMERS: present day customers, if less than 4, fill up to at least 4 using address-proximity sorted fallbacks
+    // 1. SECONDARY CUSTOMERS: present day customers, if less than 6, fill using fallbacks. Limit 5-6.
     text += `SECONDARY  CUSTOMER.\n\n`;
-    const secondaryCustomersList = dayVisits.filter(v => 
-      (v.contractorType === 'none' || v.contractorType === undefined || !v.contractorType) &&
-      v.clientMobile && v.clientMobile !== '0000000000'
+    
+    // Filter today's customers (no contractor assigned)
+    const daySecondaryCustomers = dayVisits.filter(v => 
+      (v.contractorType === 'none' || !v.contractorType)
     );
-    
-    const uniqueMobilesInDay = new Set(secondaryCustomersList.map(v => v.clientMobile).filter(Boolean));
-    const finalList = [...secondaryCustomersList];
-    
-    if (finalList.length < 4) {
+
+    // Prioritize those with mobile numbers
+    const sortedDaySecondary = [...daySecondaryCustomers].sort((a, b) => {
+      const hasMobileA = a.clientMobile && a.clientMobile !== '0000000000';
+      const hasMobileB = b.clientMobile && b.clientMobile !== '0000000000';
+      if (hasMobileA && !hasMobileB) return -1;
+      if (!hasMobileA && hasMobileB) return 1;
+      return 0;
+    });
+
+    let finalList = sortedDaySecondary.slice(0, 6);
+    const seenMobilesInReport = new Set(finalList.map(v => v.clientMobile).filter(m => m && m !== '0000000000'));
+
+    // If less than 6, add fallbacks from historical visits
+    if (finalList.length < 6) {
       const fallbackSecondary = getUniqueEntriesByMobile(visits, 'secondary');
       
-      // Sort fallback by proximity to reportPlace if defined, else dictionary order of address (to cluster nearest ones)
-      const sortedFallback = [...fallbackSecondary].sort((a, b) => {
-        const addrA = a.address || a.location || '';
-        const addrB = b.address || b.location || '';
+      // Filter out already included ones
+      const filteredFallback = fallbackSecondary.filter(v => 
+        !seenMobilesInReport.has(v.clientMobile) && 
+        !finalList.some(existing => existing.id === v.id)
+      );
+
+      // Sort fallback by priority (mobile then place/address)
+      const sortedFallback = [...filteredFallback].sort((a, b) => {
+        const hasMobileA = a.clientMobile && a.clientMobile !== '0000000000';
+        const hasMobileB = b.clientMobile && b.clientMobile !== '0000000000';
+        if (hasMobileA && !hasMobileB) return -1;
+        if (!hasMobileA && hasMobileB) return 1;
         
-        if (reportPlace && reportPlace.trim().length > 1) {
+        // Address proximity fallback
+        if (reportPlace) {
           const lowerPlace = reportPlace.toLowerCase().trim();
-          const hasA = addrA.toLowerCase().includes(lowerPlace);
-          const hasB = addrB.toLowerCase().includes(lowerPlace);
+          const hasA = (a.address || a.location || '').toLowerCase().includes(lowerPlace);
+          const hasB = (b.address || b.location || '').toLowerCase().includes(lowerPlace);
           if (hasA && !hasB) return -1;
           if (!hasA && hasB) return 1;
         }
-        return addrA.localeCompare(addrB);
+        return 0;
       });
 
       for (const v of sortedFallback) {
-        if (finalList.length >= 4) break;
-        if (v.clientMobile && !uniqueMobilesInDay.has(v.clientMobile)) {
-          uniqueMobilesInDay.add(v.clientMobile);
-          finalList.push(v);
-        }
+        if (finalList.length >= 6) break;
+        finalList.push(v);
       }
     }
 
@@ -1068,41 +1137,62 @@ export default function Dashboard({
       finalList.forEach((v, index) => {
         let baseName = v.clientName.replace(/\s+garu\b/gi, '').replace(/\s*\(owner\)/gi, '').trim();
         const name = `${baseName} garu (owner)`;
-        text += `${index + 1}.${name}, ${v.clientMobile},\ni explained the product details and he/she said I will call you\n\n`;
+        const mobile = (v.clientMobile && v.clientMobile !== '0000000000') ? v.clientMobile : (v.address || v.location || 'Place of Work');
+        text += `${index + 1}.${name}, ${mobile},\ni explained the product details and he/she said I will call you\n\n`;
       });
     }
 
-    // 2. CARPENTERS: place wise else visit wise 3 to 4 members
+    // 2. CARPENTERS: same logic as secondary customers (5-6 members)
     text += `CARPENTER/CONTRACTOR \n\n`;
-    const carpentersList = dayVisits.filter(v => v.contractorType === 'carpenter' && (v.contractorMobile || v.clientMobile) && (v.contractorMobile || v.clientMobile) !== '0000000000');
-    if (carpentersList.length > 0) {
-      const placeWiseCarpenters = [...carpentersList].sort((a, b) => {
-        const placeA = a.location || a.address || '';
-        const placeB = b.location || b.address || '';
-        return placeA.localeCompare(placeB);
+    const dayCarpenters = dayVisits.filter(v => v.contractorType === 'carpenter');
+    
+    const sortedDayCarp = [...dayCarpenters].sort((a, b) => {
+      const mobileA = a.contractorMobile || a.clientMobile;
+      const mobileB = b.contractorMobile || b.clientMobile;
+      const hasMobileA = mobileA && mobileA !== '0000000000';
+      const hasMobileB = mobileB && mobileB !== '0000000000';
+      if (hasMobileA && !hasMobileB) return -1;
+      if (!hasMobileA && hasMobileB) return 1;
+      return 0;
+    });
+
+    let finalCarpList = sortedDayCarp.slice(0, 6);
+    const seenCarpMobiles = new Set(finalCarpList.map(v => v.contractorMobile || v.clientMobile).filter(m => m && m !== '0000000000'));
+
+    if (finalCarpList.length < 6) {
+      const fallbackCarpenters = getUniqueEntriesByMobile(visits, 'carpenter');
+      const filteredFallbackCarp = fallbackCarpenters.filter(v => {
+        const m = v.contractorMobile || v.clientMobile;
+        return !seenCarpMobiles.has(m) && !finalCarpList.some(existing => existing.id === v.id);
       });
-      placeWiseCarpenters.forEach((v, index) => {
+
+      const sortedFallbackCarp = [...filteredFallbackCarp].sort((a, b) => {
+        const mobileA = a.contractorMobile || a.clientMobile;
+        const mobileB = b.contractorMobile || b.clientMobile;
+        const hasMobileA = mobileA && mobileA !== '0000000000';
+        const hasMobileB = mobileB && mobileB !== '0000000000';
+        if (hasMobileA && !hasMobileB) return -1;
+        if (!hasMobileA && hasMobileB) return 1;
+        return 0;
+      });
+
+      for (const v of sortedFallbackCarp) {
+        if (finalCarpList.length >= 6) break;
+        finalCarpList.push(v);
+      }
+    }
+
+    if (finalCarpList.length === 0) {
+      text += `No follow-up records found.\n\n`;
+    } else {
+      finalCarpList.forEach((v, index) => {
         let baseName = (v.contractorName || v.clientName).replace(/\s+garu\b/gi, '').trim();
         const name = `${baseName} garu`;
-        const mobile = v.contractorMobile || v.clientMobile;
+        const mobile = (v.contractorMobile && v.contractorMobile !== '0000000000') ? v.contractorMobile : 
+                      (v.clientMobile && v.clientMobile !== '0000000000') ? v.clientMobile :
+                      (v.address || v.location || 'Place of Work');
         text += `${index + 1}.${name}, ${mobile},\ni explained the product details and he said i will arrange next project\n\n`;
       });
-    } else {
-      const fallbackCarpenters = getUniqueEntriesByMobile(visits, 'carpenter');
-      const visitWiseFallbackCarp = [...fallbackCarpenters]
-        .sort((a, b) => new Date(b.visitingDate || b.createdAt).getTime() - new Date(a.visitingDate || a.createdAt).getTime())
-        .slice(0, 4); // 4 members (3 to 4)
-      
-      if (visitWiseFallbackCarp.length === 0) {
-        text += `No follow-up records found.\n\n`;
-      } else {
-        visitWiseFallbackCarp.forEach((v, index) => {
-          let baseName = (v.contractorName || v.clientName).replace(/\s+garu\b/gi, '').trim();
-          const name = `${baseName} garu`;
-          const mobile = v.contractorMobile || v.clientMobile;
-          text += `${index + 1}.${name}, ${mobile},\ni explained the product details and he said i will arrange next project\n\n`;
-        });
-      }
     }
 
       // 3. INTERIOR/ARCHITECTS: take visit wise else address wise (Only 1 or 2 members)
@@ -1306,6 +1396,37 @@ Report generated locally from zone sync.`;
     }
   };
 
+  const handleMapWhatsApp = (mobile: string, name: string) => {
+    const cleanPhone = mobile.replace(/\D/g, '').length === 10 ? '91' + mobile.replace(/\D/g, '') : mobile.replace(/\D/g, '');
+    setWhatsappSelectModal({
+      phone: cleanPhone,
+      text: `Hello ${name} garu, I recently visited your site, work progress is good 👍. VANM PLYWOOD. Thank you sir.`,
+      name: name
+    });
+  };
+
+  const handleMapViewHistory = (mobile: string) => {
+    const cust = customers.find(c => c.mobile === mobile);
+    if (cust) {
+      setSelectedDirItem({ type: 'customer', data: cust });
+    } else {
+      const visit = visits.find(v => v.clientMobile === mobile);
+      if (visit) {
+        setSelectedDirItem({ 
+          type: 'customer', 
+          data: { 
+            name: visit.clientName, 
+            mobile: visit.clientMobile, 
+            address: visit.address, 
+            lastVisitDate: visit.visitingDate, 
+            id: visit.id,
+            buildingType: visit.buildingType
+          } 
+        });
+      }
+    }
+  };
+
   return (
     <div className="space-y-4" id="dashboard-container">
 
@@ -1332,113 +1453,79 @@ Report generated locally from zone sync.`;
         </button>
       </div>
 
-      {/* Home Page Sub-Navigation Options for Follow-Ups & Analytics Reports */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-1.5 rounded-xl border border-slate-200 shadow-sm" id="homepage-options-navbar">
-        <div className="flex flex-wrap gap-1">
+      {/* Home Page Sub-Navigation Options for Follow-Ups & Analytics Reports arranged Grid Wise */}
+      <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm" id="homepage-options-navbar">
+        <div className="grid grid-cols-3 xs:grid-cols-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-9 gap-3">
           <button
             onClick={() => setActiveHomeTab('overview')}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition cursor-pointer font-sans ${
+            className={`p-3 rounded-xl text-[10px] font-extrabold flex flex-col items-center justify-center gap-2 transition cursor-pointer font-sans border ${
               activeHomeTab === 'overview'
-                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                : 'bg-slate-50 text-slate-600 border-slate-100 hover:bg-white hover:border-indigo-200'
             }`}
             id="opt-tab-overview"
           >
-            <Compass size={12} />
-            <span>🏡 Overview</span>
-          </button>
-
-          <button
-            onClick={() => setActiveHomeTab('followups')}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition cursor-pointer font-sans ${
-              activeHomeTab === 'followups'
-                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-            id="opt-tab-followup"
-          >
-            <Clock size={12} />
-            <span>⏳ Follow-Ups</span>
-            {totalRemindersCount > 0 && (
-              <span className="bg-orange-500 text-white text-[8px] font-extrabold px-1.5 py-0.5 rounded-full animate-pulse">
-                {totalRemindersCount}
-              </span>
-            )}
+            <Compass size={18} />
+            <span className="text-center">Overview</span>
           </button>
 
           <button
             onClick={() => setActiveHomeTab('map')}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition cursor-pointer font-sans ${
+            className={`p-3 rounded-xl text-[10px] font-extrabold flex flex-col items-center justify-center gap-2 transition cursor-pointer font-sans border ${
               activeHomeTab === 'map'
-                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                : 'bg-slate-50 text-slate-600 border-slate-100 hover:bg-white hover:border-indigo-200'
             }`}
             id="opt-tab-map"
           >
-            <MapIcon size={12} className="text-blue-500" />
-            <span>🗺️ Site Map</span>
+            <MapIcon size={18} className={activeHomeTab === 'map' ? 'text-white' : 'text-blue-500'} />
+            <span className="text-center">Site Map</span>
           </button>
 
           <button
             onClick={() => setActiveHomeTab('reports')}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition cursor-pointer font-sans ${
+            className={`p-3 rounded-xl text-[10px] font-extrabold flex flex-col items-center justify-center gap-2 transition cursor-pointer font-sans border ${
               activeHomeTab === 'reports'
-                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                : 'bg-slate-50 text-slate-600 border-slate-100 hover:bg-white hover:border-indigo-200'
             }`}
             id="opt-tab-reports"
           >
-            <BarChart4 size={12} />
-            <span>📈 Reports</span>
+            <BarChart4 size={18} />
+            <span className="text-center">Reports</span>
           </button>
 
           <button
             onClick={() => setActiveHomeTab('absent')}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition cursor-pointer font-sans ${
+            className={`p-3 rounded-xl text-[10px] font-extrabold flex flex-col items-center justify-center gap-2 transition cursor-pointer font-sans border relative ${
               activeHomeTab === 'absent'
-                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                : 'bg-slate-50 text-slate-600 border-slate-100 hover:bg-white hover:border-indigo-200'
             }`}
             id="opt-tab-absent"
           >
-            <UserX size={13} className="text-rose-600" />
-            <span>👤 Absent Sites</span>
+            <UserX size={18} className={activeHomeTab === 'absent' ? 'text-white' : 'text-rose-600'} />
+            <span className="text-center">Absent</span>
             {visits.filter(v => v.customerNotAvailable).length > 0 && (
-              <span className="bg-rose-600 text-white text-[8px] font-extrabold px-1.5 py-0.5 rounded-full animate-pulse">
+              <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[8px] font-extrabold px-1.5 py-0.5 rounded-full shadow-sm">
                 {visits.filter(v => v.customerNotAvailable).length}
               </span>
             )}
           </button>
 
           <button
-            onClick={() => setActiveHomeTab('places')}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition cursor-pointer font-sans ${
-              activeHomeTab === 'places'
-                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-            id="opt-tab-places"
-          >
-            <MapPin size={12} className="text-emerald-500" />
-            <span>📍 Places</span>
-            <span className="text-[9px] bg-emerald-550/15 text-emerald-800 px-1 rounded font-bold">
-              New
-            </span>
-          </button>
-
-          <button
             onClick={() => setActiveHomeTab('dealers')}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition cursor-pointer font-sans ${
+            className={`p-3 rounded-xl text-[10px] font-extrabold flex flex-col items-center justify-center gap-2 transition cursor-pointer font-sans border relative ${
               activeHomeTab === 'dealers'
-                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                : 'bg-slate-50 text-slate-600 border-slate-100 hover:bg-white hover:border-indigo-200'
             }`}
             id="opt-tab-dealers"
           >
-            <Building2 size={12} className="text-amber-500" />
-            <span>🏬 Dealers</span>
+            <Building2 size={18} className={activeHomeTab === 'dealers' ? 'text-white' : 'text-amber-500'} />
+            <span className="text-center">Dealers</span>
             {dealers.length > 0 && (
-              <span className="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full font-bold">
+              <span className="absolute -top-1 -right-1 bg-amber-100 text-amber-800 text-[8px] px-1.5 py-0.5 rounded-full font-bold shadow-sm">
                 {dealers.length}
               </span>
             )}
@@ -1446,45 +1533,37 @@ Report generated locally from zone sync.`;
 
           <button
             onClick={() => setActiveHomeTab('partners')}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition cursor-pointer font-sans ${
+            className={`p-3 rounded-xl text-[10px] font-extrabold flex flex-col items-center justify-center gap-2 transition cursor-pointer font-sans border relative ${
               activeHomeTab === 'partners'
-                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                : 'bg-slate-50 text-slate-600 border-slate-100 hover:bg-white hover:border-indigo-200'
             }`}
             id="opt-tab-partners"
           >
-            <UserPlus size={12} className="text-pink-500" />
-            <span>🤝 Site Partners</span>
-            <span className="text-[9px] bg-pink-100 text-pink-800 px-1.5 py-0.5 rounded-full font-bold">
-              New
-            </span>
+            <UserPlus size={18} className={activeHomeTab === 'partners' ? 'text-white' : 'text-pink-500'} />
+            <span className="text-center">Partners</span>
           </button>
 
           <button
             onClick={() => setActiveHomeTab('completed')}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition cursor-pointer font-sans ${
+            className={`p-3 rounded-xl text-[10px] font-extrabold flex flex-col items-center justify-center gap-2 transition cursor-pointer font-sans border ${
               activeHomeTab === 'completed'
-                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                : 'bg-slate-50 text-slate-600 border-slate-100 hover:bg-white hover:border-indigo-200'
             }`}
             id="opt-tab-completed"
           >
-            <Check size={12} className="text-emerald-500" />
-            <span>✅ Completed Sites</span>
-            {completedCustomers.length > 0 && (
-              <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full font-bold">
-                {completedCustomers.length}
-              </span>
-            )}
+            <CheckSquare size={18} className={activeHomeTab === 'completed' ? 'text-white' : 'text-emerald-500'} />
+            <span className="text-center">Done</span>
           </button>
         </div>
+      </div>
 
         {/* Dynamic workspace status message */}
         <div className="flex items-center gap-1.5 text-[9px] font-bold text-slate-500 font-mono tracking-wider px-1 uppercase justify-center sm:justify-start">
           <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-ping"></span>
           <span>Field Sync ({visits.length} logs)</span>
         </div>
-      </div>
 
       {activeHomeTab === 'overview' && (
         <>
@@ -1584,7 +1663,34 @@ Report generated locally from zone sync.`;
                 </p>
               </div>
               
-              <div className="flex items-center gap-2 p-1 bg-indigo-700/50 rounded-xl border border-indigo-500/30">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2 p-1 bg-white/10 rounded-xl border border-white/20 mr-2">
+                  <button
+                    onClick={() => {
+                      const next = !isProximityAlertEnabled;
+                      setIsProximityAlertEnabled(next);
+                      localStorage.setItem('vanmply_proximity_alerts', next.toString());
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1.5 ${
+                      isProximityAlertEnabled 
+                        ? 'bg-emerald-500 text-white shadow-sm' 
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    }`}
+                    title="Toggle 100m Proximity Notifications"
+                  >
+                    <Bell size={12} className={isProximityAlertEnabled ? 'animate-bounce' : ''} />
+                    {isProximityAlertEnabled ? 'Alerts ON' : 'Alerts OFF'}
+                  </button>
+                  
+                  {currentDistanceToNearest && isProximityAlertEnabled && (
+                    <div className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-white/10 text-white border border-white/5 flex items-center gap-1.5">
+                      <Navigation size={12} className="text-indigo-300" />
+                      <span>{currentDistanceToNearest.distance < 1000 ? `${Math.round(currentDistanceToNearest.distance)}m` : `${(currentDistanceToNearest.distance/1000).toFixed(1)}km`} to {currentDistanceToNearest.name}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 p-1 bg-indigo-700/50 rounded-xl border border-indigo-500/30">
                 <button
                   onClick={() => setMapType('google')}
                   className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1.5 ${
@@ -1609,8 +1715,9 @@ Report generated locally from zone sync.`;
                 </button>
               </div>
             </div>
+          </div>
             
-            <div className="relative h-[650px] w-full">
+          <div className="relative h-[650px] w-full">
               {mapType === 'google' ? (
                 <SiteVisitsMap 
                   visits={visits} 
@@ -1620,6 +1727,8 @@ Report generated locally from zone sync.`;
                       await onToggleCompleteCustomer(visit.clientMobile, true);
                     }
                   }}
+                  onWhatsApp={handleMapWhatsApp}
+                  onViewHistory={handleMapViewHistory}
                 />
               ) : (
                 <SiteVisitsOSMMap 
@@ -1630,6 +1739,8 @@ Report generated locally from zone sync.`;
                       await onToggleCompleteCustomer(visit.clientMobile, true);
                     }
                   }}
+                  onWhatsApp={handleMapWhatsApp}
+                  onViewHistory={handleMapViewHistory}
                 />
               )}
             </div>
@@ -1637,6 +1748,92 @@ Report generated locally from zone sync.`;
         </div>
       )}
 
+      {activeHomeTab === 'places' && (
+        <div className="space-y-6 animate-fade-in" id="places-visit-dashboard">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <div className="p-4 bg-slate-900 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+              <div className="space-y-1">
+                <h2 className="text-base font-extrabold tracking-tight flex items-center gap-2">
+                  <MapPin size={18} className="text-indigo-400" />
+                  <span>Geographical Location Summary</span>
+                </h2>
+                <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest font-mono">
+                  Categorizing your {visits.length} site visit logs into {uniquePlacesList.length} unique regions
+                </p>
+              </div>
+
+              <div className="relative w-full md:w-64">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search regions..."
+                  value={placesSearchQuery}
+                  onChange={(e) => setPlacesSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-1.5 border border-slate-700 rounded-xl text-xs bg-slate-800 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition font-sans"
+                />
+              </div>
+            </div>
+
+            <div className="p-4 sm:p-6 bg-slate-50">
+              {uniquePlacesList.length === 0 ? (
+                <div className="py-20 text-center text-slate-400">
+                  <MapPin size={40} className="mx-auto mb-3 opacity-20" />
+                  <p className="text-sm font-bold">No location groupings found.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {uniquePlacesList.map((place, idx) => (
+                    <motion.div
+                      key={place.placeName + idx}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.05 }}
+                      className="bg-white rounded-2xl border border-slate-150 p-4 shadow-sm hover:shadow-md transition group overflow-hidden relative"
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="bg-indigo-50 p-2 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition duration-300">
+                            <MapPin size={16} />
+                          </div>
+                          <div>
+                            <h3 className="text-xs font-black text-slate-900 truncate max-w-[140px]" title={place.placeName}>
+                              {place.placeName}
+                            </h3>
+                            <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">
+                              {place.clientCount} Total Logs
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 mb-4">
+                        <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
+                          <span className="text-[8px] text-slate-400 font-bold uppercase block mb-1 tracking-tighter">Carpenters</span>
+                          <span className="text-xs font-black text-slate-800">{place.carpenterCount}</span>
+                        </div>
+                        <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
+                          <span className="text-[8px] text-slate-400 font-bold uppercase block mb-1 tracking-tighter">Interiors</span>
+                          <span className="text-xs font-black text-slate-800">{place.interiorCount}</span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setActiveHomeTab('map');
+                          // Logic to center map on first visit of this place could go here if map component supported it
+                        }}
+                        className="w-full py-2 bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-indigo-600 hover:text-white transition duration-200 border border-indigo-100 shadow-xs"
+                      >
+                        View on Live Map
+                      </button>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {activeHomeTab === 'followups' && (
         <div className="space-y-6">
           {/* Sub-navigation option switcher */}
@@ -2251,106 +2448,163 @@ Report generated locally from zone sync.`;
             </p>
           </div>
           
-          {/* Quick Creator buttons */}
-          <div className="flex flex-wrap gap-2">
+          {/* Quick Creator buttons - Responsive Grid */}
+          <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-3" id="quick-creator-grid">
             <button
               onClick={() => setQuickAddModal('customer')}
-              className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold tracking-wide transition border border-indigo-100 flex items-center gap-1.5 cursor-pointer"
+              className="p-3 bg-white hover:bg-indigo-50 text-indigo-700 rounded-2xl text-[10px] font-bold tracking-wide transition border border-indigo-100 flex flex-col items-center justify-center gap-2 cursor-pointer shadow-sm hover:shadow-md"
               id="btn-qa-customer"
             >
-              <UserPlus size={13} />
+              <div className="p-2 bg-indigo-100 rounded-lg">
+                <UserPlus size={18} />
+              </div>
               <span>Add Customer</span>
             </button>
             <button
               onClick={() => setQuickAddModal('carpenter')}
-              className="px-3.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold tracking-wide transition border border-slate-200 flex items-center gap-1.5 cursor-pointer"
+              className="p-3 bg-white hover:bg-slate-50 text-slate-700 rounded-2xl text-[10px] font-bold tracking-wide transition border border-slate-200 flex flex-col items-center justify-center gap-2 cursor-pointer shadow-sm hover:shadow-md"
               id="btn-qa-carpenter"
             >
-              <Wrench size={13} />
+              <div className="p-2 bg-slate-100 rounded-lg">
+                <Wrench size={18} />
+              </div>
               <span>Add Carpenter</span>
             </button>
             <button
               onClick={() => setQuickAddModal('interior')}
-              className="px-3.5 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg text-xs font-bold tracking-wide transition border border-teal-100 flex items-center gap-1.5 cursor-pointer"
+              className="p-3 bg-white hover:bg-teal-50 text-teal-700 rounded-2xl text-[10px] font-bold tracking-wide transition border border-teal-100 flex flex-col items-center justify-center gap-2 cursor-pointer shadow-sm hover:shadow-md"
               id="btn-qa-interior"
             >
-              <Paintbrush size={13} />
+              <div className="p-2 bg-teal-100 rounded-lg">
+                <Paintbrush size={18} />
+              </div>
               <span>Add Interior</span>
             </button>
             <button
               onClick={() => setQuickAddModal('architect')}
-              className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-105 text-blue-700 rounded-lg text-xs font-bold tracking-wide transition border border-blue-200 flex items-center gap-1.5 cursor-pointer"
+              className="p-3 bg-white hover:bg-blue-50 text-blue-700 rounded-2xl text-[10px] font-bold tracking-wide transition border border-blue-200 flex flex-col items-center justify-center gap-2 cursor-pointer shadow-sm hover:shadow-md"
               id="btn-qa-architect"
             >
-              <Building2 size={13} />
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <Building2 size={18} />
+              </div>
               <span>Add Architect</span>
+            </button>
+            <button
+              onClick={() => setQuickAddModal('builder')}
+              className="p-3 bg-white hover:bg-amber-50 text-amber-700 rounded-2xl text-[10px] font-bold tracking-wide transition border border-amber-200 flex flex-col items-center justify-center gap-2 cursor-pointer shadow-sm hover:shadow-md"
+              id="btn-qa-builder"
+            >
+              <div className="p-2 bg-amber-100 rounded-lg">
+                <Briefcase size={18} />
+              </div>
+              <span>Add Builder</span>
             </button>
           </div>
         </div>
 
         {/* Directory tabs and Search bar */}
-        <div className="flex flex-col sm:flex-row justify-between gap-4">
-          {/* Tabs */}
-          <div className="flex p-1 bg-slate-100 rounded-xl w-fit">
+        <div className="flex flex-col gap-6">
+          {/* Tabs - Responsive Grid Layout */}
+          <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-3" id="directory-tabs-grid">
             <button
               onClick={() => { setActiveDirTab('customers'); setDirSearchQuery(''); }}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              className={`p-4 rounded-2xl text-xs font-bold transition flex flex-col items-center justify-center gap-3 cursor-pointer border-2 ${
                 activeDirTab === 'customers'
-                  ? 'bg-white text-indigo-750 shadow-sm'
-                  : 'text-slate-650 hover:text-slate-900'
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg'
+                  : 'bg-slate-50 text-slate-600 border-slate-100 hover:border-indigo-200 hover:bg-white'
               }`}
             >
-              <User size={13} />
-              <span>Customers ({customers.length})</span>
+              <div className={`p-2.5 rounded-xl ${activeDirTab === 'customers' ? 'bg-white/20' : 'bg-indigo-100 text-indigo-600'}`}>
+                <User size={22} />
+              </div>
+              <div className="flex flex-col items-center gap-0.5">
+                <span>Customers</span>
+                <span className={`text-[10px] font-medium ${activeDirTab === 'customers' ? 'text-indigo-100' : 'text-slate-400'}`}>
+                  {customers.length} logs
+                </span>
+              </div>
             </button>
+
             <button
               onClick={() => { setActiveDirTab('carpenters'); setDirSearchQuery(''); }}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              className={`p-4 rounded-2xl text-xs font-bold transition flex flex-col items-center justify-center gap-3 cursor-pointer border-2 ${
                 activeDirTab === 'carpenters'
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-650 hover:text-slate-900'
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg'
+                  : 'bg-slate-50 text-slate-600 border-slate-100 hover:border-indigo-200 hover:bg-white'
               }`}
             >
-              <Wrench size={13} />
-              <span>Carpenters ({carpenters.length})</span>
+              <div className={`p-2.5 rounded-xl ${activeDirTab === 'carpenters' ? 'bg-white/20' : 'bg-slate-100 text-slate-600'}`}>
+                <Wrench size={22} />
+              </div>
+              <div className="flex flex-col items-center gap-0.5">
+                <span>Carpenters</span>
+                <span className={`text-[10px] font-medium ${activeDirTab === 'carpenters' ? 'text-indigo-100' : 'text-slate-400'}`}>
+                  {carpenters.length} logs
+                </span>
+              </div>
             </button>
+
             <button
               onClick={() => { setActiveDirTab('interiors'); setDirSearchQuery(''); }}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              className={`p-4 rounded-2xl text-xs font-bold transition flex flex-col items-center justify-center gap-3 cursor-pointer border-2 ${
                 activeDirTab === 'interiors'
-                  ? 'bg-white text-teal-900 shadow-sm'
-                  : 'text-slate-650 hover:text-slate-900'
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg'
+                  : 'bg-slate-50 text-slate-600 border-slate-100 hover:border-indigo-200 hover:bg-white'
               }`}
             >
-              <Paintbrush size={13} />
-              <span>Interiors ({interiors.length})</span>
+              <div className={`p-2.5 rounded-xl ${activeDirTab === 'interiors' ? 'bg-white/20' : 'bg-teal-100 text-teal-600'}`}>
+                <Paintbrush size={22} />
+              </div>
+              <div className="flex flex-col items-center gap-0.5">
+                <span>Interiors</span>
+                <span className={`text-[10px] font-medium ${activeDirTab === 'interiors' ? 'text-indigo-100' : 'text-slate-400'}`}>
+                  {interiors.length} logs
+                </span>
+              </div>
             </button>
+
             <button
               onClick={() => { setActiveDirTab('architects'); setDirSearchQuery(''); }}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              className={`p-4 rounded-2xl text-xs font-bold transition flex flex-col items-center justify-center gap-3 cursor-pointer border-2 ${
                 activeDirTab === 'architects'
-                  ? 'bg-white text-blue-900 shadow-sm'
-                  : 'text-slate-650 hover:text-slate-900'
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg'
+                  : 'bg-slate-50 text-slate-600 border-slate-100 hover:border-indigo-200 hover:bg-white'
               }`}
             >
-              <Building2 size={13} />
-              <span>Architects ({architects.length})</span>
+              <div className={`p-2.5 rounded-xl ${activeDirTab === 'architects' ? 'bg-white/20' : 'bg-blue-100 text-blue-600'}`}>
+                <Building2 size={22} />
+              </div>
+              <div className="flex flex-col items-center gap-0.5">
+                <span>Architects</span>
+                <span className={`text-[10px] font-medium ${activeDirTab === 'architects' ? 'text-indigo-100' : 'text-slate-400'}`}>
+                  {architects.length} logs
+                </span>
+              </div>
             </button>
+
             <button
               onClick={() => { setActiveDirTab('builders'); setDirSearchQuery(''); }}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              className={`p-4 rounded-2xl text-xs font-bold transition flex flex-col items-center justify-center gap-3 cursor-pointer border-2 ${
                 activeDirTab === 'builders'
-                  ? 'bg-white text-amber-900 shadow-sm'
-                  : 'text-slate-650 hover:text-slate-900'
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg'
+                  : 'bg-slate-50 text-slate-600 border-slate-100 hover:border-indigo-200 hover:bg-white'
               }`}
             >
-              <Briefcase size={13} />
-              <span>Builders ({builders.length})</span>
+              <div className={`p-2.5 rounded-xl ${activeDirTab === 'builders' ? 'bg-white/20' : 'bg-amber-100 text-amber-600'}`}>
+                <Briefcase size={22} />
+              </div>
+              <div className="flex flex-col items-center gap-0.5">
+                <span>Builders</span>
+                <span className={`text-[10px] font-medium ${activeDirTab === 'builders' ? 'text-indigo-100' : 'text-slate-400'}`}>
+                  {builders.length} logs
+                </span>
+              </div>
             </button>
           </div>
 
           {/* Search query box */}
-          <div className="relative max-w-xs w-full">
+          <div className="relative w-full">
             <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
               <Search size={14} />
             </span>
@@ -4019,290 +4273,6 @@ Report generated locally from zone sync.`;
         </div>
       )}
 
-      {activeHomeTab === 'places' && (
-        <div className="space-y-6 animate-fade-in" id="places-visit-dashboard">
-          
-          {/* Header row / intro */}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-4">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 pb-4">
-              <div className="space-y-1">
-                <h2 className="text-base font-extrabold text-slate-950 font-sans tracking-tight flex items-center gap-2">
-                  <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-emerald-100 text-emerald-600 text-xs">📍</span>
-                  <span>Geographic Places of Visit Summary</span>
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Track and monitor visited places date-wise, including exact customer site counts, and partner leads (carpenters & interiors) captured.
-                </p>
-              </div>
-
-              {/* Places Search Bar */}
-              <div className="relative w-full md:w-72">
-                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                  <Search size={14} />
-                </span>
-                <input
-                  type="text"
-                  placeholder="Filter places or dates..."
-                  value={placesFilter}
-                  onChange={(e) => setPlacesFilter(e.target.value)}
-                  className="w-full pl-9 pr-10 py-2 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 transition font-sans text-slate-800"
-                />
-                {placesFilter && (
-                  <button
-                    onClick={() => setPlacesFilter('')}
-                    className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-slate-450 hover:text-slate-750 text-[10px] cursor-pointer"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Micro KPIs Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-1">
-              <div className="bg-slate-50/70 border border-slate-100 rounded-xl p-3 text-center">
-                <span className="text-[9.5px] uppercase font-mono tracking-wider font-extrabold text-slate-505 block">📍 Places Visited</span>
-                <span className="text-xl font-black text-slate-900 mt-1 block">
-                  {new Set(visits.map(v => getPlaceName(v))).size}
-                </span>
-              </div>
-              <div className="bg-slate-50/70 border border-slate-100 rounded-xl p-3 text-center">
-                <span className="text-[9.5px] uppercase font-mono tracking-wider font-extrabold text-slate-505 block">📅 Dynamic Days</span>
-                <span className="text-xl font-black text-slate-900 mt-1 block">
-                  {new Set(visits.map(v => v.visitingDate)).size}
-                </span>
-              </div>
-              <div className="bg-slate-50/70 border border-slate-100 rounded-xl p-3 text-center">
-                <span className="text-[9.5px] uppercase font-mono tracking-wider font-extrabold text-slate-555 block">🪚 Carpenters</span>
-                <span className="text-xl font-black text-slate-800 mt-1 block">
-                  {visits.filter(v => v.carpenterName || v.carpenterMobile).length}
-                </span>
-              </div>
-              <div className="bg-slate-50/70 border border-slate-100 rounded-xl p-3 text-center">
-                <span className="text-[9.5px] uppercase font-mono tracking-wider font-extrabold text-slate-555 block">📐 Interiors</span>
-                <span className="text-xl font-black text-slate-800 mt-1 block">
-                  {visits.filter(v => v.interiorName || v.interiorMobile).length}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Places Grid Section */}
-          {uniquePlacesList.length === 0 ? (
-            <div className="bg-white border border-slate-150 rounded-2xl p-12 text-center text-slate-500 font-sans space-y-3">
-              <span className="text-3xl block">🗺️</span>
-              <h4 className="text-sm font-semibold text-slate-800">No Location Logs found</h4>
-              <p className="text-xs max-w-sm mx-auto text-slate-450 leading-relaxed">
-                We couldn't locate any records matching your search target. Enter fresh location logs in the New Visit form or search for clear matches.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
-              {uniquePlacesList.map((place, idx) => (
-                <div 
-                  key={`${place.placeName}-${idx}`}
-                  className="bg-white border border-slate-200 hover:border-indigo-300 rounded-xl p-5 shadow-2xs hover:shadow-md transition-all duration-300 flex flex-col justify-between space-y-4"
-                >
-                  {/* Title of Place */}
-                  <div className="flex-1 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-3">
-                        <span className="text-sm font-extrabold text-slate-900 leading-snug tracking-tight font-sans block break-words">
-                          📍 {place.placeName}
-                        </span>
-                      </div>
-
-                      {/* Quick statistics horizontal badges - Customer count, Carpenter count, Interior count only */}
-                      <div className="grid grid-cols-3 gap-2 mt-4 font-sans">
-                        <div className="bg-indigo-50/50 border border-indigo-100/30 p-2 rounded-lg text-center font-sans" title="Total Customers logged in this area">
-                          <span className="text-[9px] text-slate-400 block font-mono font-semibold">Customer Count</span>
-                          <span className="text-sm font-black text-indigo-700 mt-1 block">📊 {place.clientCount}</span>
-                        </div>
-                        <div className="bg-emerald-50/50 border border-emerald-100/30 p-2 rounded-lg text-center font-sans" title="Carpenters associated with visits in this area">
-                          <span className="text-[9px] text-slate-400 block font-mono font-semibold">Carpenter Count</span>
-                          <span className="text-sm font-black text-emerald-700 mt-1 block">🪚 {place.carpenterCount}</span>
-                        </div>
-                        <div className="bg-sky-50/50 border border-sky-100/30 p-2 rounded-lg text-center font-sans" title="Interior Designers associated with visits in this area">
-                          <span className="text-[9px] text-slate-400 block font-mono font-semibold">Interior Count</span>
-                          <span className="text-sm font-black text-sky-700 mt-1 block">📐 {place.interiorCount}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setExpandedPlaces(prev => ({
-                            ...prev,
-                            [place.placeName]: !prev[place.placeName]
-                          }));
-                        }}
-                        className="w-full py-2 bg-indigo-50 border border-indigo-100/80 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        👥 {expandedPlaces[place.placeName] ? 'Hide Pincode Details' : `View Pincode-wise Clients (${place.visits.length})`}
-                      </button>
-
-                      {expandedPlaces[place.placeName] && (
-                        <div className="mt-4 pt-4 border-t border-slate-100 space-y-4 font-sans animate-fade-in">
-                          <p className="text-[10px] font-extrabold text-slate-450 font-mono tracking-wider uppercase">Associated Groups (Pincode-wise)</p>
-                          <div className="space-y-4 max-h-[420px] overflow-y-auto pr-1">
-                            {(() => {
-                              // Group visits of this city by v.pincode
-                              const grouped: Record<string, SiteVisit[]> = {};
-                              place.visits.forEach(visit => {
-                                const pinKey = (visit.pincode || 'No Pincode').trim();
-                                if (!grouped[pinKey]) {
-                                  grouped[pinKey] = [];
-                                }
-                                grouped[pinKey].push(visit);
-                              });
-
-                              return Object.entries(grouped).map(([pinCode, pinVisits]) => (
-                                <div key={pinCode} className="space-y-2.5 border-l-2 border-indigo-500 pl-3">
-                                  <div className="flex items-center gap-1.5 text-[9.5px] font-black text-indigo-700 font-mono tracking-wider uppercase bg-indigo-50/70 py-1 px-2.5 rounded-lg border border-indigo-100/40 inline-flex">
-                                    <span>📮 Pin: {pinCode}</span>
-                                    <span className="bg-indigo-100 text-indigo-800 rounded-full h-4 min-w-4 px-1 flex items-center justify-center text-[9px] font-bold shrink-0">{pinVisits.length}</span>
-                                  </div>
-                                  <div className="space-y-3">
-                                    {pinVisits.map((visit, vIdx) => {
-                                      const vPhone = visit.clientMobile || '';
-                                      const hasVPhone = vPhone && vPhone !== '0000000000';
-                                      const cleanVPhone = vPhone.replace(/\D/g, '').length === 10 ? '91' + vPhone.replace(/\D/g, '') : vPhone.replace(/\D/g, '');
-                                      return (
-                                        <div key={vIdx} className="bg-slate-50/60 hover:bg-slate-50 border border-slate-150 rounded-xl p-3.5 space-y-3 transition shadow-3xs text-left">
-                                          <div className="flex justify-between items-start gap-2">
-                                            <div className="flex gap-3 min-w-0 flex-1">
-                                              {visit.photo && (
-                                                <SitePhotoItem 
-                                                  visit={visit} 
-                                                  onEnlarge={setSelectedImage}
-                                                  className="w-14 h-14 rounded-lg overflow-hidden border border-slate-200 flex-shrink-0 relative group/img cursor-zoom-in"
-                                                  imageClassName="w-full h-full object-cover"
-                                                />
-                                              )}
-                                              <div className="min-w-0 flex-1">
-                                                <h4 className="text-xs font-black text-slate-850 leading-tight">{visit.clientName}</h4>
-                                                <div className="flex flex-wrap gap-1 mt-1.5">
-                                                  {visit.buildingType && (
-                                                    <span className="text-[8.5px] uppercase font-mono px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100/30">
-                                                      🏢 {visit.buildingType}
-                                                    </span>
-                                                  )}
-                                                  {visit.buildingStatus && (
-                                                    <span className="text-[8.5px] uppercase font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100/30">
-                                                      🔨 {visit.buildingStatus}
-                                                    </span>
-                                                  )}
-                                                  {visit.leadStatus && (
-                                                    <span className={`text-[8.5px] uppercase font-mono px-1.5 py-0.5 rounded border ${
-                                                      visit.leadStatus === 'hot' 
-                                                        ? 'bg-rose-50 text-rose-700 border-rose-100/50 font-bold' 
-                                                        : 'bg-slate-100 text-slate-550 border-slate-200/50'
-                                                    }`}>
-                                                      🔥 {visit.leadStatus === 'hot' ? 'HOT LEAD' : 'COLD'}
-                                                    </span>
-                                                  )}
-                                                </div>
-                                              </div>
-                                            </div>
-                                            <span className="text-[9px] font-mono text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded shrink-0">
-                                              {formatDateToDDMMYYYY(visit.visitingDate)}
-                                            </span>
-                                          </div>
-
-                                          {/* Landmark & Notes */}
-                                          {(visit.nearestLandmark || visit.notes) && (
-                                            <div className="text-[10px] text-slate-600 bg-white border border-slate-100 rounded-lg p-2 space-y-1">
-                                              {visit.nearestLandmark && (
-                                                <p className="leading-tight"><span className="font-extrabold text-slate-800">Landmark:</span> {visit.nearestLandmark}</p>
-                                              )}
-                                              {visit.notes && (
-                                                <p className="leading-normal italic text-slate-500 font-serif">"{visit.notes}"</p>
-                                              )}
-                                            </div>
-                                          )}
-
-                                          {/* Partners associated with visit */}
-                                          {(visit.carpenterName || visit.interiorName) && (
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[9.5px]">
-                                              {visit.carpenterName && (
-                                                <div className="bg-emerald-50/20 border border-emerald-100/30 rounded-lg p-1.5 flex flex-col justify-center">
-                                                  <span className="font-bold text-slate-400 font-mono text-[8.5px] uppercase">Associated Carpenter</span>
-                                                  <span className="font-semibold text-emerald-800 truncate">{visit.carpenterName}</span>
-                                                  {visit.carpenterMobile && visit.carpenterMobile !== '0000000000' && (
-                                                    <span className="text-[8px] text-slate-400 font-mono">{visit.carpenterMobile}</span>
-                                                  )}
-                                                </div>
-                                              )}
-                                              {visit.interiorName && (
-                                                <div className="bg-sky-50/20 border border-sky-100/30 rounded-lg p-1.5 flex flex-col justify-center">
-                                                  <span className="font-bold text-slate-400 font-mono text-[8.5px] uppercase">Associated Interior</span>
-                                                  <span className="font-semibold text-sky-800 truncate">{visit.interiorName}</span>
-                                                  {visit.interiorMobile && visit.interiorMobile !== '0000000000' && (
-                                                    <span className="text-[8px] text-slate-400 font-mono">{visit.interiorMobile}</span>
-                                                  )}
-                                                </div>
-                                              )}
-                                            </div>
-                                          )}
-
-                                          {/* Call / WhatsApp actions */}
-                                          <div className="flex gap-2 pt-1 border-t border-slate-100/60">
-                                            {hasVPhone ? (
-                                              <a
-                                                href={`tel:${vPhone}`}
-                                                className="flex-1 py-1 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100/50 text-indigo-700 font-bold text-[10px] rounded-lg transition flex items-center justify-center gap-1 cursor-pointer text-center"
-                                              >
-                                                <PhoneCall size={9} />
-                                                <span>Call</span>
-                                              </a>
-                                            ) : (
-                                              <span className="flex-1 py-1 bg-slate-100 border border-slate-150 text-slate-400 text-[10px] font-bold rounded-lg flex items-center justify-center cursor-not-allowed select-none">
-                                                No Phone
-                                              </span>
-                                            )}
-
-                                            {hasVPhone ? (
-                                              <button
-                                                type="button"
-                                                onClick={() => {
-                                                  setWhatsappSelectModal({
-                                                    phone: cleanVPhone,
-                                                    text: `hello ${visit.clientName} garu,i recently visited your site, work progress is good 👍, VANM PLYWOOD.thank you sir.`,
-                                                    name: visit.clientName
-                                                  });
-                                                }}
-                                                className="flex-1 py-1 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100/50 text-emerald-700 font-bold text-[10px] rounded-lg transition flex items-center justify-center gap-1 cursor-pointer"
-                                              >
-                                                <MessageCircle size={9} />
-                                                <span>WhatsApp</span>
-                                              </button>
-                                            ) : (
-                                              <span className="flex-1 py-1 bg-slate-100 border border-slate-150 text-slate-400 text-[10px] font-bold rounded-lg flex items-center justify-center cursor-not-allowed select-none">
-                                                No WhatsApp
-                                              </span>
-                                            )}
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              ));
-                            })()}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {activeHomeTab === 'dealers' && (
         <div className="space-y-6 animate-fade-in" id="dealers-portal-view">
           {/* Header element */}
@@ -4993,15 +4963,15 @@ Report generated locally from zone sync.`;
                 <input
                   type="text"
                   placeholder="Search completed sites..."
-                  value={placesFilter}
-                  onChange={(e) => setPlacesFilter(e.target.value)}
+                  value={completedSearchQuery}
+                  onChange={(e) => setCompletedSearchQuery(e.target.value)}
                   className="w-full pl-9 pr-4 py-1.5 border border-slate-200 rounded-xl text-xs bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition text-slate-850 font-sans"
                 />
               </div>
             </div>
 
             {(() => {
-              const query = placesFilter.trim().toLowerCase();
+              const query = completedSearchQuery.trim().toLowerCase();
               const filteredCompleted = completedCustomers.filter(c => {
                 return (
                   c.name.toLowerCase().includes(query) ||

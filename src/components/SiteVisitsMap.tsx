@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { APIProvider, Map, AdvancedMarker, Pin, useMap, useMapsLibrary, InfoWindow } from '@vis.gl/react-google-maps';
-import { Navigation, MapPin, Info, Crosshair, Phone, Calendar, User, Home, CheckCircle, Edit2, Maximize2, X } from 'lucide-react';
+import { Navigation, MapPin, Info, Crosshair, Phone, Calendar, User, Home, CheckCircle, Edit2, Maximize2, X, MessageCircle, History } from 'lucide-react';
 import { SiteVisit } from '../types';
+import { SitePhotoItem } from './SitePhotoItem';
 
 const API_KEY =
   process.env.GOOGLE_MAPS_PLATFORM_KEY ||
@@ -47,9 +48,11 @@ interface SiteVisitsMapProps {
   visits: SiteVisit[];
   onEditVisit?: (visit: SiteVisit) => void;
   onCompleteVisit?: (visit: SiteVisit) => void;
+  onViewHistory?: (mobile: string) => void;
+  onWhatsApp?: (mobile: string, name: string) => void;
 }
 
-export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit }: SiteVisitsMapProps) {
+export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit, onViewHistory, onWhatsApp }: SiteVisitsMapProps) {
   const [userLocation, setUserLocation] = useState<google.maps.LatLngLiteral | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [mapCenter, setMapCenter] = useState<google.maps.LatLngLiteral>({ lat: 20.5937, lng: 78.9629 }); // Default center of India
@@ -250,24 +253,13 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit }: 
               >
                 <div className="w-[300px] p-1 font-sans">
                   {selectedVisit.photo && (
-                    <div className="relative h-32 mb-3 rounded-xl overflow-hidden group">
-                      <img 
-                        src={selectedVisit.photo} 
-                        alt="Site" 
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
+                    <div className="mb-3">
+                      <SitePhotoItem 
+                        visit={selectedVisit} 
+                        onEnlarge={(photo) => setFullPhoto(photo)}
+                        className="relative w-full h-32 rounded-xl overflow-hidden shadow-inner cursor-zoom-in group bg-slate-50 border border-slate-100"
+                        imageClassName="w-full h-full object-cover group-hover:scale-105 duration-200"
                       />
-                      <div className="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition flex items-center justify-center opacity-0 group-hover:opacity-100">
-                        <button 
-                          onClick={() => setFullPhoto(selectedVisit.photo || null)}
-                          className="p-2 bg-white/90 rounded-full text-slate-900 shadow-lg transform scale-90 group-hover:scale-100 transition"
-                        >
-                          <Maximize2 size={16} />
-                        </button>
-                      </div>
-                      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent p-3 pointer-events-none">
-                        <p className="text-white text-[10px] font-bold truncate">{selectedVisit.clientName}</p>
-                      </div>
                     </div>
                   )}
 
@@ -344,6 +336,34 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit }: 
                           <Phone size={14} />
                         </a>
                       </div>
+
+                      <div className="flex gap-2">
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            if (onWhatsApp) {
+                              onWhatsApp(selectedVisit.clientMobile, selectedVisit.clientName);
+                            } else {
+                              const mobile = selectedVisit.clientMobile || '';
+                              const cleanPhone = mobile.replace(/\D/g, '').length === 10 ? '91' + mobile.replace(/\D/g, '') : mobile.replace(/\D/g, '');
+                              const text = encodeURIComponent(`Hello ${selectedVisit.clientName} garu, I recently visited your site, work progress is good 👍. VANM PLYWOOD. Thank you sir.`);
+                              window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
+                            }
+                          }}
+                          className="flex-1 bg-emerald-600 text-white py-1.5 rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition flex items-center justify-center gap-1.5 shadow-sm"
+                        >
+                          <MessageCircle size={12} />
+                          WhatsApp
+                        </button>
+                        <button 
+                          onClick={() => onViewHistory?.(selectedVisit.clientMobile)}
+                          className="flex-1 bg-indigo-50 text-indigo-700 py-1.5 rounded-lg text-[10px] font-bold border border-indigo-100 hover:bg-indigo-100 transition flex items-center justify-center gap-1.5 shadow-sm"
+                        >
+                          <History size={12} />
+                          Visit Log
+                        </button>
+                      </div>
+                    </div>
                       
                       <button 
                         onClick={() => {
@@ -359,7 +379,6 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit }: 
                       </button>
                     </div>
                   </div>
-                </div>
               </InfoWindow>
             )}
           </Map>

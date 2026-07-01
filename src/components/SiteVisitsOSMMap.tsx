@@ -2,8 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Navigation, MapPin, Crosshair, Map as MapIcon, Layers, Phone, Calendar, User, Home, CheckCircle, Edit2, Maximize2, X } from 'lucide-react';
+import { Navigation, MapPin, Crosshair, Map as MapIcon, Layers, Phone, Calendar, User, Home, CheckCircle, Edit2, Maximize2, X, MessageCircle, History, ZoomIn, ZoomOut, Compass, ChevronRight, Search, Target } from 'lucide-react';
 import { SiteVisit } from '../types';
+import { SitePhotoItem } from './SitePhotoItem';
+
+// ... (marker icons remain the same)
 
 // Fix for default marker icons in Leaflet with React
 // @ts-ignore
@@ -87,10 +90,23 @@ const userIcon = new L.Icon({
   shadowSize: [41, 41]
 });
 
-// Component to handle map centering
-function ChangeView({ center, zoom }: { center: [number, number], zoom: number }) {
+const selectedIcon = new L.Icon({
+  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+  iconSize: [35, 57], // Larger
+  iconAnchor: [17, 57],
+  popupAnchor: [1, -48],
+  shadowSize: [57, 57]
+});
+
+// Component to handle map centering and zoom
+function MapController({ center, zoom, selectedVisitId }: { center: [number, number], zoom: number, selectedVisitId: string | null }) {
   const map = useMap();
-  map.setView(center, zoom);
+  
+  useEffect(() => {
+    map.setView(center, zoom);
+  }, [center, zoom, map]);
+
   return null;
 }
 
@@ -98,14 +114,19 @@ interface SiteVisitsOSMMapProps {
   visits: SiteVisit[];
   onEditVisit?: (visit: SiteVisit) => void;
   onCompleteVisit?: (visit: SiteVisit) => void;
+  onViewHistory?: (mobile: string) => void;
+  onWhatsApp?: (mobile: string, name: string) => void;
 }
 
-export default function SiteVisitsOSMMap({ visits, onEditVisit, onCompleteVisit }: SiteVisitsOSMMapProps) {
+export default function SiteVisitsOSMMap({ visits, onEditVisit, onCompleteVisit, onViewHistory, onWhatsApp }: SiteVisitsOSMMapProps) {
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [mapCenter, setMapCenter] = useState<[number, number]>([20.5937, 78.9629]); // Default center of India
   const [zoom, setZoom] = useState(5);
   const [fullPhoto, setFullPhoto] = useState<string | null>(null);
+  const [selectedVisitId, setSelectedVisitId] = useState<string | null>(null);
+  const [showClientList, setShowClientList] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     handleDetectLocation();
@@ -119,7 +140,7 @@ export default function SiteVisitsOSMMap({ visits, onEditVisit, onCompleteVisit 
           const loc: [number, number] = [position.coords.latitude, position.coords.longitude];
           setUserLocation(loc);
           setMapCenter(loc);
-          setZoom(13);
+          setZoom(14);
           setIsLocating(false);
         },
         (error) => {
@@ -141,6 +162,23 @@ export default function SiteVisitsOSMMap({ visits, onEditVisit, onCompleteVisit 
       setIsLocating(false);
     }
   };
+
+  const handleZoomIn = () => setZoom(prev => Math.min(prev + 1, 19));
+  const handleZoomOut = () => setZoom(prev => Math.max(prev - 1, 3));
+
+  const handleSelectVisit = (visit: SiteVisit) => {
+    if (visit.latitude && visit.longitude) {
+      setMapCenter([visit.latitude, visit.longitude]);
+      setZoom(16);
+      setSelectedVisitId(visit.id);
+      setShowClientList(false);
+    }
+  };
+
+  const filteredVisits = visits.filter(v => 
+    v.clientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (v.address || v.location || '').toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const handleNavigate = (visit: SiteVisit) => {
     if (visit.latitude && visit.longitude) {
@@ -193,8 +231,9 @@ export default function SiteVisitsOSMMap({ visits, onEditVisit, onCompleteVisit 
           zoom={zoom} 
           style={{ height: '100%', width: '100%' }}
           scrollWheelZoom={true}
+          zoomControl={false} // Disable default zoom control
         >
-          <ChangeView center={mapCenter} zoom={zoom} />
+          <MapController center={mapCenter} zoom={zoom} selectedVisitId={selectedVisitId} />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -224,26 +263,21 @@ export default function SiteVisitsOSMMap({ visits, onEditVisit, onCompleteVisit 
             <Marker 
               key={visit.id} 
               position={[visit.latitude!, visit.longitude!]}
-              icon={getMarkerIcon(visit)}
+              icon={selectedVisitId === visit.id ? selectedIcon : getMarkerIcon(visit)}
+              eventHandlers={{
+                click: () => setSelectedVisitId(visit.id),
+              }}
             >
               <Popup className="custom-osm-popup">
                 <div className="w-[280px] p-0.5 font-sans">
                   {visit.photo && (
-                    <div className="relative h-24 mb-2 rounded-lg overflow-hidden group">
-                      <img 
-                        src={visit.photo} 
-                        alt="Site" 
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
+                    <div className="mb-2">
+                      <SitePhotoItem 
+                        visit={visit} 
+                        onEnlarge={(photo) => setFullPhoto(photo)}
+                        className="relative w-full h-24 rounded-lg overflow-hidden shadow-inner cursor-zoom-in group bg-slate-50 border border-slate-100"
+                        imageClassName="w-full h-full object-cover group-hover:scale-105 duration-200"
                       />
-                      <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
-                        <button 
-                          onClick={() => setFullPhoto(visit.photo || null)}
-                          className="p-1.5 bg-white/90 rounded-full text-slate-900 shadow-md transform scale-90"
-                        >
-                          <Maximize2 size={12} />
-                        </button>
-                      </div>
                     </div>
                   )}
 
@@ -303,6 +337,34 @@ export default function SiteVisitsOSMMap({ visits, onEditVisit, onCompleteVisit 
                           <Phone size={11} />
                         </a>
                       </div>
+
+                      <div className="flex gap-1.5">
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            if (onWhatsApp) {
+                              onWhatsApp(visit.clientMobile, visit.clientName);
+                            } else {
+                              const mobile = visit.clientMobile || '';
+                              const cleanPhone = mobile.replace(/\D/g, '').length === 10 ? '91' + mobile.replace(/\D/g, '') : mobile.replace(/\D/g, '');
+                              const text = encodeURIComponent(`Hello ${visit.clientName} garu, I recently visited your site, work progress is good 👍. VANM PLYWOOD. Thank you sir.`);
+                              window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
+                            }
+                          }}
+                          className="flex-1 bg-emerald-600 text-white py-1.5 rounded text-[9px] font-bold hover:bg-emerald-700 transition flex items-center justify-center gap-1 shadow-sm"
+                        >
+                          <MessageCircle size={10} />
+                          WhatsApp
+                        </button>
+                        <button 
+                          onClick={() => onViewHistory?.(visit.clientMobile)}
+                          className="flex-1 bg-indigo-50 text-indigo-700 py-1.5 rounded text-[9px] font-bold border border-indigo-100 hover:bg-indigo-100 transition flex items-center justify-center gap-1 shadow-sm"
+                        >
+                          <History size={10} />
+                          Visit Log
+                        </button>
+                      </div>
+                    </div>
                       
                       <button 
                         onClick={() => {
@@ -317,11 +379,113 @@ export default function SiteVisitsOSMMap({ visits, onEditVisit, onCompleteVisit 
                       </button>
                     </div>
                   </div>
-                </div>
               </Popup>
             </Marker>
           ))}
         </MapContainer>
+
+        {/* Custom Map Controls Overlay */}
+        <div className="absolute top-4 right-4 z-[1000] flex flex-col gap-2">
+          {/* Zoom Controls */}
+          <div className="flex flex-col bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+            <button 
+              onClick={handleZoomIn}
+              className="p-2.5 hover:bg-slate-50 text-slate-700 transition border-b border-slate-100"
+              title="Zoom In"
+            >
+              <ZoomIn size={18} />
+            </button>
+            <button 
+              onClick={handleZoomOut}
+              className="p-2.5 hover:bg-slate-50 text-slate-700 transition"
+              title="Zoom Out"
+            >
+              <ZoomOut size={18} />
+            </button>
+          </div>
+
+          {/* Compass / Orientation */}
+          <div className="bg-white p-2.5 rounded-xl shadow-lg border border-slate-200 flex items-center justify-center relative group">
+            <Compass size={18} className="text-slate-400 group-hover:text-indigo-600 transition" />
+            <div className="absolute -left-16 bg-slate-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap">
+              North Up
+            </div>
+            {/* NESW Indicator labels */}
+            <span className="absolute -top-1 text-[8px] font-black text-slate-300">N</span>
+            <span className="absolute -bottom-1 text-[8px] font-black text-slate-300">S</span>
+            <span className="absolute -left-1 text-[8px] font-black text-slate-300">W</span>
+            <span className="absolute -right-1 text-[8px] font-black text-slate-300">E</span>
+          </div>
+
+          {/* Client List Toggle */}
+          <button 
+            onClick={() => setShowClientList(!showClientList)}
+            className={`p-2.5 rounded-xl shadow-lg border transition flex items-center justify-center ${
+              showClientList ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+            }`}
+            title="Client Selection"
+          >
+            <Search size={18} />
+          </button>
+
+          {/* Recenter on Me */}
+          <button 
+            onClick={handleDetectLocation}
+            disabled={isLocating}
+            className="p-2.5 bg-white border border-slate-200 rounded-xl shadow-lg text-slate-700 hover:bg-slate-50 transition flex items-center justify-center"
+            title="Recenter on My Location"
+          >
+            <Target size={18} className={isLocating ? 'animate-spin' : ''} />
+          </button>
+        </div>
+
+        {/* Client Selection Panel */}
+        {showClientList && (
+          <div className="absolute top-4 right-16 z-[1001] w-72 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in slide-in-from-right-4 fade-in duration-200">
+            <div className="p-3 border-b border-slate-100 bg-slate-50/50">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                <input 
+                  type="text" 
+                  placeholder="Search clients or sites..." 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="max-h-[350px] overflow-y-auto p-1 custom-scrollbar">
+              {filteredVisits.length > 0 ? (
+                filteredVisits.map(visit => (
+                  <button
+                    key={visit.id}
+                    onClick={() => handleSelectVisit(visit)}
+                    className="w-full flex items-center gap-3 p-2.5 hover:bg-indigo-50 rounded-xl transition text-left group"
+                  >
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                      visit.leadStatus === 'hot' ? 'bg-rose-100 text-rose-600' : 'bg-indigo-100 text-indigo-600'
+                    }`}>
+                      <MapPin size={14} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-bold text-slate-900 truncate group-hover:text-indigo-700 transition">{visit.clientName}</p>
+                      <p className="text-[9px] text-slate-500 truncate">{visit.address || visit.location || 'No address'}</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-300 group-hover:text-indigo-400 group-hover:translate-x-0.5 transition" />
+                  </button>
+                ))
+              ) : (
+                <div className="py-8 text-center">
+                  <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-2">
+                    <Search size={16} className="text-slate-400" />
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-medium">No sites found</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Full Photo Modal */}
         {fullPhoto && (
