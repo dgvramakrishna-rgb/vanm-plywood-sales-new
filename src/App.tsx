@@ -21,6 +21,14 @@ import Dashboard from './components/Dashboard';
 import VisitForm from './components/VisitForm';
 import VisitList from './components/VisitList';
 import Login from './components/Login';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+
+interface LocationServicePluginType {
+  startService(options: { clients: string }): Promise<{ status: string }>;
+  stopService(): Promise<{ status: string }>;
+}
+
+const LocationServicePlugin = registerPlugin<LocationServicePluginType>('LocationServicePlugin');
 import { 
   Building2, 
   Briefcase, 
@@ -96,6 +104,26 @@ export default function App() {
       console.error('Failed to reload database records', err);
     }
   };
+
+  // Synchronize visits with Android Location Service in Capacitor/Android
+  useEffect(() => {
+    if (Capacitor.getPlatform() === 'android') {
+      const activeClients = visits
+        .filter(v => !v.isCompleted && v.latitude !== null && v.longitude !== null)
+        .map(v => ({
+          clientName: v.clientName,
+          clientMobile: v.clientMobile,
+          address: v.address || v.location || '',
+          latitude: v.latitude,
+          longitude: v.longitude,
+          isCompleted: !!v.isCompleted
+        }));
+
+      LocationServicePlugin.startService({ clients: JSON.stringify(activeClients) })
+        .then(() => console.log('[LocationService] Synchronized active clients successfully'))
+        .catch(err => console.error('[LocationService] Failed to sync active clients:', err));
+    }
+  }, [visits]);
 
   // Instantiate the background synchronization hook
   const { isOnline, isSyncing, unsyncedCount, triggerSync } = useBackgroundSync(async () => {
