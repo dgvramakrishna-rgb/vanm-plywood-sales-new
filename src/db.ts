@@ -43,6 +43,17 @@ export function sanitizeDocId(mobile: string): string {
   return mobile.trim().replace(/[\s\-\(\)\+]/g, '');
 }
 
+export function isMobileMatch(m1?: string, m2?: string): boolean {
+  const num1 = (m1 || '8790816023').trim().replace(/\D/g, '');
+  const num2 = (m2 || '').trim().replace(/\D/g, '');
+  if (!num2) return false;
+  if (num1 === num2) return true;
+  if (num1.length >= 10 && num2.length >= 10) {
+    return num1.slice(-10) === num2.slice(-10);
+  }
+  return false;
+}
+
 // --- Local IndexedDB Setup ---
 
 function openDB(): Promise<IDBDatabase> {
@@ -103,7 +114,7 @@ export async function getLocalVisits(userMobile?: string): Promise<SiteVisit[]> 
       request.onsuccess = () => {
         let visits = request.result as SiteVisit[];
         if (userMobile) {
-          visits = visits.filter(v => (v.userMobile || '8790816023') === userMobile);
+          visits = visits.filter(v => isMobileMatch(v.userMobile, userMobile));
         }
         visits.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         resolve(visits);
@@ -455,7 +466,7 @@ export async function getAllDealers(userMobile?: string): Promise<{ id: string; 
     localStorage.setItem('fieldconnect_dealers_cache', JSON.stringify(dealers));
 
     if (userMobile) {
-      dealers = dealers.filter(d => (d.userMobile || '8790816023') === userMobile);
+      dealers = dealers.filter(d => isMobileMatch(d.userMobile, userMobile));
     }
 
     dealers.sort((a, b) => {
@@ -475,7 +486,7 @@ export async function getAllDealers(userMobile?: string): Promise<{ id: string; 
     try {
       let dealers = JSON.parse(cached);
       if (userMobile) {
-        dealers = dealers.filter((d: any) => (d.userMobile || '8790816023') === userMobile);
+        dealers = dealers.filter((d: any) => isMobileMatch(d.userMobile, userMobile));
       }
       dealers.sort((a: any, b: any) => {
         const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
@@ -502,7 +513,7 @@ export async function getAllVisits(userMobile?: string): Promise<SiteVisit[]> {
     });
 
     if (userMobile) {
-      cloudVisits = cloudVisits.filter(v => (v.userMobile || '8790816023') === userMobile);
+      cloudVisits = cloudVisits.filter(v => isMobileMatch(v.userMobile, userMobile));
     }
 
     // Sort visits by creation date descending (newest first)

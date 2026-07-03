@@ -42,8 +42,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     setError(null);
 
     const cleanMobile = mobile.replace(/\D/g, '');
-    if (cleanMobile.length < 10) {
-      setError('Please enter a valid 10-digit mobile number.');
+    if (cleanMobile.length !== 10) {
+      setError('Please enter exactly a 10-digit mobile number.');
       return;
     }
 
@@ -174,10 +174,13 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                     required
                     disabled={needsRegistration}
                     value={mobile}
-                    onChange={(e) => setMobile(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                      setMobile(val);
+                    }}
                     className="block w-full pl-10 pr-4 py-2.5 text-xs border border-slate-300 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/40 text-slate-850 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-600 dark:focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-900 transition disabled:opacity-60"
                     placeholder="e.g. 9876543210"
-                    maxLength={15}
+                    maxLength={10}
                   />
                 </div>
               </div>

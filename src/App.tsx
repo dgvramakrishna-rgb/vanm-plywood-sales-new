@@ -14,7 +14,8 @@ import {
   getAllDealers,
   saveDealerToFirestore,
   deleteDealerFromFirestore,
-  sanitizeDocId
+  sanitizeDocId,
+  isMobileMatch
 } from './db';
 import { SiteVisit, Dealer } from './types';
 import { useBackgroundSync } from './syncService';
@@ -261,7 +262,7 @@ export default function App() {
         if (cachedD) {
           try {
             const parsed = JSON.parse(cachedD);
-            const filtered = parsed.filter((d: any) => (d.userMobile || '8790816023') === currentUser.mobile);
+            const filtered = parsed.filter((d: any) => isMobileMatch(d.userMobile, currentUser.mobile));
             setDealers(filtered);
           } catch (e) {}
         }
