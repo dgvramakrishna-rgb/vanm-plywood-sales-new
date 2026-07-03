@@ -92,7 +92,7 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-export async function getLocalVisits(): Promise<SiteVisit[]> {
+export async function getLocalVisits(userMobile?: string): Promise<SiteVisit[]> {
   try {
     const dbInstance = await openDB();
     return new Promise((resolve, reject) => {
@@ -101,7 +101,10 @@ export async function getLocalVisits(): Promise<SiteVisit[]> {
       const request = store.getAll();
 
       request.onsuccess = () => {
-        const visits = request.result as SiteVisit[];
+        let visits = request.result as SiteVisit[];
+        if (userMobile) {
+          visits = visits.filter(v => (v.userMobile || '8790816023') === userMobile);
+        }
         visits.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         resolve(visits);
       };
@@ -165,6 +168,7 @@ export async function testFirebaseConnection(): Promise<void> {
 // --- User Profile DB Operations ---
 
 export interface ExecutiveUser {
+  id?: string;
   name: string;
   mobile: string;
   zone: string;
@@ -177,7 +181,11 @@ export async function fetchUserFromFirestore(mobile: string): Promise<ExecutiveU
   try {
     const userDoc = await getDoc(doc(db, 'users', cleanId));
     if (userDoc.exists()) {
-      return userDoc.data() as ExecutiveUser;
+      const data = userDoc.data() as ExecutiveUser;
+      if (!data.id) {
+        data.id = 'usr_' + cleanId;
+      }
+      return data;
     }
     return null;
   } catch (error) {
@@ -194,8 +202,10 @@ export async function saveUserToFirestore(user: ExecutiveUser): Promise<void> {
   const cleanId = sanitizeDocId(user.mobile);
   const userPath = `users/${cleanId}`;
   try {
+    const userId = user.id || 'usr_' + cleanId;
     await setDoc(doc(db, 'users', cleanId), serializeForFirestore({
       ...user,
+      id: userId,
       createdAt: user.createdAt || new Date().toISOString()
     }));
   } catch (error) {
@@ -432,20 +442,27 @@ export async function deleteDealerFromFirestore(mobile: string): Promise<void> {
   }
 }
 
-export async function getAllDealers(): Promise<{ id: string; name: string; dealerPointName: string; place: string; mobile: string; createdAt: string }[]> {
+export async function getAllDealers(userMobile?: string): Promise<{ id: string; name: string; dealerPointName: string; place: string; mobile: string; createdAt: string; userMobile?: string; userId?: string }[]> {
   const path = 'dealers';
   try {
     const querySnapshot = await getDocs(collection(db, path));
-    const dealers: { id: string; name: string; dealerPointName: string; place: string; mobile: string; createdAt: string }[] = [];
+    let dealers: { id: string; name: string; dealerPointName: string; place: string; mobile: string; createdAt: string; userMobile?: string; userId?: string }[] = [];
     querySnapshot.forEach((docSnap) => {
       dealers.push(docSnap.data() as any);
     });
+    
+    // Save all to cache for reference
+    localStorage.setItem('fieldconnect_dealers_cache', JSON.stringify(dealers));
+
+    if (userMobile) {
+      dealers = dealers.filter(d => (d.userMobile || '8790816023') === userMobile);
+    }
+
     dealers.sort((a, b) => {
       const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
       return dateB - dateA;
     });
-    localStorage.setItem('fieldconnect_dealers_cache', JSON.stringify(dealers));
     return dealers;
   } catch (error) {
     if (isPermissionError(error)) {
@@ -456,7 +473,16 @@ export async function getAllDealers(): Promise<{ id: string; name: string; deale
     const cached = localStorage.getItem('fieldconnect_dealers_cache');
     if (!cached) return [];
     try {
-      return JSON.parse(cached);
+      let dealers = JSON.parse(cached);
+      if (userMobile) {
+        dealers = dealers.filter((d: any) => (d.userMobile || '8790816023') === userMobile);
+      }
+      dealers.sort((a: any, b: any) => {
+        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return dateB - dateA;
+      });
+      return dealers;
     } catch (e) {
       console.warn("Corrupted dealers cache in localStorage:", e);
       return [];
@@ -466,14 +492,18 @@ export async function getAllDealers(): Promise<{ id: string; name: string; deale
 
 // --- Site Visits / Customer Absent (Unavailable) Sites Operations ---
 
-export async function getAllVisits(): Promise<SiteVisit[]> {
+export async function getAllVisits(userMobile?: string): Promise<SiteVisit[]> {
   const visitsPath = 'visits';
   try {
     const querySnapshot = await getDocs(collection(db, visitsPath));
-    const cloudVisits: SiteVisit[] = [];
+    let cloudVisits: SiteVisit[] = [];
     querySnapshot.forEach((docSnap) => {
       cloudVisits.push(docSnap.data() as SiteVisit);
     });
+
+    if (userMobile) {
+      cloudVisits = cloudVisits.filter(v => (v.userMobile || '8790816023') === userMobile);
+    }
 
     // Sort visits by creation date descending (newest first)
     cloudVisits.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -489,7 +519,7 @@ export async function getAllVisits(): Promise<SiteVisit[]> {
       handleFirestoreError(error, OperationType.GET, visitsPath);
     } else {
       console.warn("Failed to fetch visits from Firestore. Falling back to local IndexedDB.", error);
-      return await getLocalVisits();
+      return await getLocalVisits(userMobile);
     }
   }
 }

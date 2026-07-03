@@ -4,7 +4,7 @@ import { Phone, ArrowRight, User, Compass, Sparkles } from 'lucide-react';
 import { fetchUserFromFirestore, saveUserToFirestore } from '../db';
 
 interface LoginProps {
-  onLoginSuccess: (user: { name: string; mobile: string; zone: string }) => void;
+  onLoginSuccess: (user: { id?: string; name: string; mobile: string; zone: string }) => void;
 }
 
 export default function Login({ onLoginSuccess }: LoginProps) {
@@ -59,11 +59,17 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         );
         if (existingUser) {
           // User exists! Auto login
-          onLoginSuccess({
+          const userId = existingUser.id || 'usr_' + cleanMobile;
+          const userWithId = {
+            id: userId,
             name: existingUser.name,
             mobile: existingUser.mobile,
             zone: existingUser.zone
-          });
+          };
+          if (!existingUser.id) {
+            await saveUserToFirestore(userWithId).catch(e => console.warn("Could not backfill user id", e));
+          }
+          onLoginSuccess(userWithId);
         } else {
           // User doesn't exist yet, show registration inputs
           setNeedsRegistration(true);
@@ -78,6 +84,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         }
 
         const newUserPayload = {
+          id: 'usr_' + cleanMobile,
           name: fullName.trim(),
           mobile: cleanMobile,
           zone: zone
@@ -98,6 +105,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       // Delay slightly to let the user read the error/info before redirection
       setTimeout(() => {
         onLoginSuccess({
+          id: 'usr_' + cleanMobile,
           name: fullName || `Executive (${cleanMobile.slice(-4)})`,
           mobile: cleanMobile,
           zone: zone || 'Local Field HQ'

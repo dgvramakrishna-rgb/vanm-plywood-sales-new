@@ -13,7 +13,8 @@ import {
   getLocalVisits,
   getAllDealers,
   saveDealerToFirestore,
-  deleteDealerFromFirestore
+  deleteDealerFromFirestore,
+  sanitizeDocId
 } from './db';
 import { SiteVisit, Dealer } from './types';
 import { useBackgroundSync } from './syncService';
@@ -96,9 +97,9 @@ export default function App() {
   // Reload visits function for quick real-time synchronization updates
   const reloadVisits = async () => {
     try {
-      const records = await getAllVisits();
+      const records = await getAllVisits(currentUser?.mobile);
       setVisits(records);
-      const dlrs = await getAllDealers();
+      const dlrs = await getAllDealers(currentUser?.mobile);
       setDealers(dlrs);
     } catch (err) {
       console.error('Failed to reload database records', err);
@@ -241,19 +242,27 @@ export default function App() {
     }
   };
 
-  // Load visits on startup
+  // Load visits on startup or when user changes
   useEffect(() => {
     async function loadData() {
+      if (!currentUser) {
+        setVisits([]);
+        setDealers([]);
+        return;
+      }
       try {
+        setIsLoading(true);
         // 1. Instantly load local/cached visits to make the app interactive immediately
-        const cached = await getLocalVisits();
+        const cached = await getLocalVisits(currentUser.mobile);
         setVisits(cached || []);
         setIsLoading(false); // Set to false immediately so the app is instantly interactive!
 
         const cachedD = localStorage.getItem('fieldconnect_dealers_cache');
         if (cachedD) {
           try {
-            setDealers(JSON.parse(cachedD));
+            const parsed = JSON.parse(cachedD);
+            const filtered = parsed.filter((d: any) => (d.userMobile || '8790816023') === currentUser.mobile);
+            setDealers(filtered);
           } catch (e) {}
         }
 
@@ -263,14 +272,14 @@ export default function App() {
         });
 
         // 3. Keep loading state up-to-date with remote server changes in the background
-        const records = await getAllVisits();
+        const records = await getAllVisits(currentUser.mobile);
         // Automatically purge any previously seeded records matching 'seed-visit' to ensure a perfectly clean user DB
         const seedVisits = records.filter(v => v.id.startsWith('seed-visit'));
         if (seedVisits.length > 0) {
           for (const sV of seedVisits) {
             await deleteVisit(sV.id);
           }
-          const cleanRecords = await getAllVisits();
+          const cleanRecords = await getAllVisits(currentUser.mobile);
           setVisits(cleanRecords);
           triggerToast('Sample visits successfully removed for clean slate.', 'info');
         } else {
@@ -278,7 +287,7 @@ export default function App() {
         }
 
         // Load remote dealers
-        const dlrs = await getAllDealers();
+        const dlrs = await getAllDealers(currentUser.mobile);
         setDealers(dlrs);
       } catch (err) {
         console.error('Failed to load database records', err);
@@ -287,7 +296,7 @@ export default function App() {
       }
     }
     loadData();
-  }, []);
+  }, [currentUser?.mobile]);
 
   // Form submit handler
   const handleSaveVisit = async (visitInput: Omit<SiteVisit, 'id' | 'createdAt'> & { id?: string; createdAt?: string }) => {
@@ -295,13 +304,15 @@ export default function App() {
     const finalVisit: SiteVisit = {
       ...visitInput,
       id: visitInput.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'idx-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)),
+      userMobile: currentUser?.mobile,
+      userId: currentUser?.id || (currentUser?.mobile ? 'usr_' + sanitizeDocId(currentUser.mobile) : undefined),
       createdAt: visitInput.createdAt || new Date().toISOString()
     };
 
     try {
       await saveVisit(finalVisit);
       // Reload visits
-      const records = await getAllVisits();
+      const records = await getAllVisits(currentUser?.mobile);
       setVisits(records);
       setActiveTab('dashboard'); // take back to summary dashboard post successful entry
       setEditingVisit(null);
@@ -326,7 +337,7 @@ export default function App() {
           isCompleted
         });
       }
-      const records = await getAllVisits();
+      const records = await getAllVisits(currentUser?.mobile);
       setVisits(records);
       triggerToast(`Site marked as ${isCompleted ? 'completed/closed' : 'active'} successfully for ${associatedVisits[0].clientName || 'customer'}!`);
     } catch (err) {
@@ -340,11 +351,13 @@ export default function App() {
     const finalDealer: Dealer = {
       ...dealerInput,
       id: dealerInput.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'dlr-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)),
+      userMobile: currentUser?.mobile,
+      userId: currentUser?.id || (currentUser?.mobile ? 'usr_' + sanitizeDocId(currentUser.mobile) : undefined),
       createdAt: dealerInput.createdAt || new Date().toISOString()
     };
     try {
       await saveDealerToFirestore(finalDealer);
-      const dlrs = await getAllDealers();
+      const dlrs = await getAllDealers(currentUser?.mobile);
       setDealers(dlrs);
       triggerToast(`Dealer "${dealerInput.dealerPointName}" saved successfully.`);
     } catch (err) {
@@ -364,7 +377,7 @@ export default function App() {
       action: async () => {
         try {
           await deleteDealerFromFirestore(mobile);
-          const dlrs = await getAllDealers();
+          const dlrs = await getAllDealers(currentUser?.mobile);
           setDealers(dlrs);
           triggerToast('Dealer profile successfully deleted.');
         } catch (err) {
@@ -417,7 +430,7 @@ export default function App() {
               }
             }
           }
-          const records = await getAllVisits();
+          const records = await getAllVisits(currentUser?.mobile);
           setVisits(records);
           triggerToast('Site visit and associated partner records safely deleted.');
         } catch (err) {
@@ -876,7 +889,7 @@ export default function App() {
                         } catch (err) {
                           console.error("Failed to delete customer profile:", err);
                         }
-                        const records = await getAllVisits();
+                        const records = await getAllVisits(currentUser?.mobile);
                         setVisits(records);
                         triggerToast(`Customer and all associated visits deleted successfully.`);
                       }
@@ -908,7 +921,7 @@ export default function App() {
                         } catch (err) {
                           console.error("Failed to delete carpenter profile:", err);
                         }
-                        const records = await getAllVisits();
+                        const records = await getAllVisits(currentUser?.mobile);
                         setVisits(records);
                         triggerToast(`Carpenter removed successfully.`);
                       }
@@ -940,7 +953,7 @@ export default function App() {
                         } catch (err) {
                           console.error("Failed to delete interior profile:", err);
                         }
-                        const records = await getAllVisits();
+                        const records = await getAllVisits(currentUser?.mobile);
                         setVisits(records);
                         triggerToast(`Interior Designer removed successfully.`);
                       }
@@ -972,7 +985,7 @@ export default function App() {
                         } catch (err) {
                           console.error("Failed to delete architect profile:", err);
                         }
-                        const records = await getAllVisits();
+                        const records = await getAllVisits(currentUser?.mobile);
                         setVisits(records);
                         triggerToast(`Architect removed successfully.`);
                       }
@@ -1004,7 +1017,7 @@ export default function App() {
                         } catch (err) {
                           console.error("Failed to delete builder profile:", err);
                         }
-                        const records = await getAllVisits();
+                        const records = await getAllVisits(currentUser?.mobile);
                         setVisits(records);
                         triggerToast(`Builder removed successfully.`);
                       }

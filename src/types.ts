@@ -1,5 +1,7 @@
 export interface SiteVisit {
   id: string;
+  userMobile?: string;
+  userId?: string;
   clientName: string;
   clientMobile: string;
   address: string;
@@ -58,6 +60,8 @@ export interface DashboardStats {
 
 export interface Dealer {
   id: string;
+  userMobile?: string;
+  userId?: string;
   name: string;
   dealerPointName: string;
   place: string;
