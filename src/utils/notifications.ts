@@ -129,3 +129,61 @@ export async function sendLocalNotification(title: string, body: string, delayMs
     }
   }
 }
+
+/**
+ * Plays a pulsing beep sound for exactly 5 seconds (5000ms).
+ * Utilizes the Web Audio API for highly reliable audio synthesis across both web and wrapped android apps.
+ */
+export function playProximityBeep(durationMs = 5000) {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) {
+      console.warn('Web Audio API is not supported in this environment.');
+      return;
+    }
+    
+    // Attempt to play a haptic vibration alongside the audio
+    if (navigator.vibrate) {
+      navigator.vibrate([200, 100, 200, 100, 200]);
+    }
+    
+    const audioCtx = new AudioContextClass();
+    const startTime = audioCtx.currentTime;
+    
+    // Pulse beep: play sound for 250ms, silent for 250ms (interval = 500ms)
+    const interval = 500; // ms
+    const beepDuration = 250; // ms
+    const pulsesCount = Math.floor(durationMs / interval);
+    
+    for (let i = 0; i < pulsesCount; i++) {
+      const osc = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(950, audioCtx.currentTime); // 950Hz pleasant, clear tone
+      
+      const pulseStart = startTime + (i * interval) / 1000;
+      const pulseEnd = pulseStart + beepDuration / 1000;
+      
+      // Setup envelope to prevent speaker "pop" click sound
+      gainNode.gain.setValueAtTime(0, pulseStart);
+      gainNode.gain.linearRampToValueAtTime(0.25, pulseStart + 0.015);
+      gainNode.gain.setValueAtTime(0.25, pulseEnd - 0.015);
+      gainNode.gain.linearRampToValueAtTime(0, pulseEnd);
+      
+      osc.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      
+      osc.start(pulseStart);
+      osc.stop(pulseEnd);
+    }
+    
+    // Auto-close AudioContext to release system resources after playback completes
+    setTimeout(() => {
+      audioCtx.close().catch(err => console.error("Error closing AudioContext:", err));
+    }, durationMs + 500);
+  } catch (error) {
+    console.error("Failed to play proximity alert beep sound:", error);
+  }
+}
+

@@ -53,7 +53,8 @@ import SiteVisitsOSMMap from './SiteVisitsOSMMap';
 import { 
   requestNotificationPermission, 
   getNotificationPermissionStatus, 
-  sendLocalNotification
+  sendLocalNotification,
+  playProximityBeep
 } from '../utils/notifications';
 
 // Helper to open URLs externally in Capacitor or native contexts gracefully
@@ -107,6 +108,7 @@ export default function Dashboard({
 }: DashboardProps) {
   // Current date constants based on system date
   const todayStr = new Date().toISOString().split('T')[0];
+  const absentVisits = visits.filter(v => v.customerNotAvailable === true && !v.isCompleted);
   
   // Navigation tab state within the Home Page: overview, followups, reports, absent, places, dealers, completed, partners
   const [activeHomeTab, setActiveHomeTab] = useState<'overview' | 'followups' | 'reports' | 'absent' | 'places' | 'dealers' | 'completed' | 'partners' | 'map'>('overview');
@@ -132,7 +134,7 @@ export default function Dashboard({
 
   // Track profile form inputs
   const [profName, setProfName] = useState(currentUser?.name || '');
-  const [profCompany, setProfCompany] = useState(currentUser?.companyName || 'VANM PLY Pro');
+  const [profCompany, setProfCompany] = useState(currentUser?.companyName || 'Sales Pro');
   const [profMobile, setProfMobile] = useState(currentUser?.mobile || '');
   const [isProfileExpanded, setIsProfileExpanded] = useState(true); // show by default for accessibility
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
@@ -142,7 +144,7 @@ export default function Dashboard({
     if (initialCurrentUser) {
       setCurrentUser(initialCurrentUser);
       setProfName(initialCurrentUser.name);
-      setProfCompany(initialCurrentUser.companyName || 'VANM PLY Pro');
+      setProfCompany(initialCurrentUser.companyName || 'Sales Pro');
       setProfMobile(initialCurrentUser.mobile);
     }
   }, [initialCurrentUser]);
@@ -248,6 +250,9 @@ export default function Dashboard({
             );
             setNotifiedSiteIds(prev => new Set(prev).add(visit.id));
             
+            // Play pulsing alert beep sound for exactly 5 seconds
+            playProximityBeep(5000);
+            
             if (onTriggerToast) {
               onTriggerToast(`📍 Arrival: ${visit.clientName} is ${Math.round(distance)}m away!`, 'info');
             }
@@ -300,7 +305,7 @@ export default function Dashboard({
       });
       const responseNeededInteriors = interiorsMap.size;
 
-      const title = 'VANM PLY: Active Follow-up Reminders';
+      const title = 'Sales Tracker: Active Follow-up Reminders';
       let bodyParts: string[] = [];
       
       if (autoNotifyClients && pendingClientCount > 0) {
@@ -342,7 +347,7 @@ export default function Dashboard({
           clearInterval(interval);
           // Trigger verification local notification
           sendLocalNotification(
-            "🔔 VANM PLY: Offline Reminders Live!",
+            "🔔 Sales Tracker: Offline Reminders Live!",
             "Your offline notifications are working perfectly on this phone! 👍",
             500
           );
@@ -385,11 +390,11 @@ export default function Dashboard({
   const [reportLeadFilter, setReportLeadFilter] = useState<'all' | 'hot' | 'cold'>('all');
 
   const [whatsappTemplate] = useState<string>(
-    "hello [Client] garu,i recently visited your site, work progress is good 👍, VANM PLYWOOD.thank you sir."
+    "hello [Client] garu,i recently visited your site, work progress is good 👍.thank you sir."
   );
 
   const [partnerWhatsappTemplate] = useState<string>(
-    "hello [Partner] garu,how are you.projects going well.VANM PLYWOOD, Regards"
+    "hello [Partner] garu,how are you.projects going well, Regards"
   );
 
   // Simple stub mock states for compatibility if they are referenced anywhere
@@ -1400,7 +1405,7 @@ Report generated locally from zone sync.`;
     const cleanPhone = mobile.replace(/\D/g, '').length === 10 ? '91' + mobile.replace(/\D/g, '') : mobile.replace(/\D/g, '');
     setWhatsappSelectModal({
       phone: cleanPhone,
-      text: `Hello ${name} garu, I recently visited your site, work progress is good 👍. VANM PLYWOOD. Thank you sir.`,
+      text: `Hello ${name} garu, I recently visited your site, work progress is good 👍. Thank you sir.`,
       name: name
     });
   };
@@ -1720,7 +1725,7 @@ Report generated locally from zone sync.`;
           <div className="relative h-[650px] w-full">
               {mapType === 'google' ? (
                 <SiteVisitsMap 
-                  visits={visits} 
+                  visits={visits.filter(v => !v.isCompleted)} 
                   onEditVisit={onEditVisit}
                   onCompleteVisit={async (visit) => {
                     if (onToggleCompleteCustomer) {
@@ -1732,7 +1737,7 @@ Report generated locally from zone sync.`;
                 />
               ) : (
                 <SiteVisitsOSMMap 
-                  visits={visits} 
+                  visits={visits.filter(v => !v.isCompleted)} 
                   onEditVisit={onEditVisit}
                   onCompleteVisit={async (visit) => {
                     if (onToggleCompleteCustomer) {
@@ -2230,8 +2235,8 @@ Report generated locally from zone sync.`;
                                       setWhatsappSelectModal({
                                         phone: cleanPh,
                                         text: activeFollowupSubTab === 'client' 
-                                          ? `hello ${item.name} garu,i recently visited your site, work progress is good 👍, VANM PLYWOOD.thank you sir.`
-                                          : `hello ${item.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`,
+                                          ? `hello ${item.name} garu,i recently visited your site, work progress is good 👍.thank you sir.`
+                                          : `hello ${item.name} garu,how are you.projects going well, Regards`,
                                         name: item.name
                                       });
                                       handleFollowupInteraction(item, 'WhatsApp');
@@ -2331,8 +2336,8 @@ Report generated locally from zone sync.`;
                                       setWhatsappSelectModal({
                                         phone: cleanPh,
                                         text: activeFollowupSubTab === 'client' 
-                                          ? `hello ${item.name} garu,i recently visited your site, work progress is good 👍, VANM PLYWOOD.thank you sir.`
-                                          : `hello ${item.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`,
+                                          ? `hello ${item.name} garu,i recently visited your site, work progress is good 👍.thank you sir.`
+                                          : `hello ${item.name} garu,how are you.projects going well, Regards`,
                                         name: item.name
                                       });
                                       handleFollowupInteraction(item, 'WhatsApp');
@@ -2409,8 +2414,8 @@ Report generated locally from zone sync.`;
                               setWhatsappSelectModal({
                                 phone: cleanPh,
                                 text: activeFollowupSubTab === 'client' 
-                                  ? `hello ${item.name} garu,i recently visited your site, work progress is good 👍, VANM PLYWOOD.thank you sir.`
-                                  : `hello ${item.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`,
+                                  ? `hello ${item.name} garu,i recently visited your site, work progress is good 👍.thank you sir.`
+                                  : `hello ${item.name} garu,how are you.projects going well, Regards`,
                                 name: item.name
                               });
                               handleFollowupInteraction(item, 'WhatsApp');
@@ -2767,7 +2772,7 @@ Report generated locally from zone sync.`;
                                           const cleanPh = c.mobile.replace(/\D/g, '').length === 10 ? '91' + c.mobile.replace(/\D/g, '') : c.mobile.replace(/\D/g, '');
                                           setWhatsappSelectModal({
                                             phone: cleanPh,
-                                            text: `hello ${c.name} garu,i recently visited your site, work progress is good 👍, VANM PLYWOOD.thank you sir.`,
+                                            text: `hello ${c.name} garu,i recently visited your site, work progress is good 👍.thank you sir.`,
                                             name: c.name
                                           });
                                         }}
@@ -2871,7 +2876,7 @@ Report generated locally from zone sync.`;
                                           const cleanPh = c.mobile.replace(/\D/g, '').length === 10 ? '91' + c.mobile.replace(/\D/g, '') : c.mobile.replace(/\D/g, '');
                                           setWhatsappSelectModal({
                                             phone: cleanPh,
-                                            text: `hello ${c.name} garu,i recently visited your site, work progress is good 👍, VANM PLYWOOD.thank you sir.`,
+                                            text: `hello ${c.name} garu,i recently visited your site, work progress is good 👍.thank you sir.`,
                                             name: c.name
                                           });
                                         }}
@@ -2920,7 +2925,7 @@ Report generated locally from zone sync.`;
                               <h4 className="text-sm font-semibold text-slate-900 leading-snug truncate">{c.name}</h4>
                               <p className="text-[10px] text-slate-400 font-mono mt-0.5">Last Active: {c.lastVisitDate}</p>
                             </div>
-                            <span className="px-2 py-0.5 roundedbg-amber-50 rounded text-amber-700 border border-amber-100/50 font-bold uppercase tracking-wider text-[8px]">{c.buildingType || 'Home'}</span>
+                            <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100/50 font-bold uppercase tracking-wider text-[8px]">{c.buildingType || 'Home'}</span>
                           </div>
                           
                           <div className="space-y-1.5 text-xs text-slate-650 font-sans">
@@ -2950,7 +2955,7 @@ Report generated locally from zone sync.`;
                                   const cleanPh = c.mobile.replace(/\D/g, '').length === 10 ? '91' + c.mobile.replace(/\D/g, '') : c.mobile.replace(/\D/g, '');
                                   setWhatsappSelectModal({
                                     phone: cleanPh,
-                                    text: `hello ${c.name} garu,i recently visited your site, work progress is good 👍, VANM PLYWOOD.thank you sir.`,
+                                    text: `hello ${c.name} garu,i recently visited your site, work progress is good 👍.thank you sir.`,
                                     name: c.name
                                   });
                                 }}
@@ -3043,7 +3048,7 @@ Report generated locally from zone sync.`;
                                 const cleanPh = c.mobile.replace(/\D/g, '').length === 10 ? '91' + c.mobile.replace(/\D/g, '') : c.mobile.replace(/\D/g, '');
                                 setWhatsappSelectModal({
                                   phone: cleanPh,
-                                  text: `hello ${c.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`,
+                                  text: `hello ${c.name} garu,how are you.projects going well, Regards`,
                                   name: c.name
                                 });
                               }}
@@ -3132,7 +3137,7 @@ Report generated locally from zone sync.`;
                                 const cleanPh = i.mobile.replace(/\D/g, '').length === 10 ? '91' + i.mobile.replace(/\D/g, '') : i.mobile.replace(/\D/g, '');
                                 setWhatsappSelectModal({
                                   phone: cleanPh,
-                                  text: `hello ${i.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`,
+                                  text: `hello ${i.name} garu,how are you.projects going well, Regards`,
                                   name: i.name
                                 });
                               }}
@@ -3220,7 +3225,7 @@ Report generated locally from zone sync.`;
                                 const cleanPh = a.mobile.replace(/\D/g, '').length === 10 ? '91' + a.mobile.replace(/\D/g, '') : a.mobile.replace(/\D/g, '');
                                 setWhatsappSelectModal({
                                   phone: cleanPh,
-                                  text: `hello ${a.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`,
+                                  text: `hello ${a.name} garu,how are you.projects going well, Regards`,
                                   name: a.name
                                 });
                               }}
@@ -3308,7 +3313,7 @@ Report generated locally from zone sync.`;
                                 const cleanPh = b.mobile.replace(/\D/g, '').length === 10 ? '91' + b.mobile.replace(/\D/g, '') : b.mobile.replace(/\D/g, '');
                                 setWhatsappSelectModal({
                                   phone: cleanPh,
-                                  text: `hello ${b.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`,
+                                  text: `hello ${b.name} garu,how are you.projects going well, Regards`,
                                   name: b.name
                                 });
                               }}
@@ -4019,70 +4024,70 @@ Report generated locally from zone sync.`;
 
       {activeHomeTab === 'absent' && (
         <div className="space-y-6 animate-fade-in" id="client-absent-dashboard">
-          
-          {/* Header row / intro */}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-4">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 pb-4">
-              <div className="space-y-1">
-                <h2 className="text-base font-extrabold text-slate-950 font-sans tracking-tight flex items-center gap-2">
-                  <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-rose-100 text-rose-600 text-xs">👤</span>
-                  <span>Unattended & Client Absent Site Logs</span>
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Detailed logs of sites where check-ins were registered while the customer was absent or unavailable.
+            
+            {/* Header row / intro */}
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-4">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 pb-4">
+                <div className="space-y-1">
+                  <h2 className="text-base font-extrabold text-slate-950 font-sans tracking-tight flex items-center gap-2">
+                    <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-rose-100 text-rose-600 text-xs">👤</span>
+                    <span>Unattended & Client Absent Site Logs</span>
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Detailed logs of sites where check-ins were registered while the customer was absent or unavailable.
+                  </p>
+                </div>
+                <div className="text-xs bg-slate-100 px-3 py-1.5 rounded-full text-slate-600 font-bold font-mono">
+                  {absentVisits.length} Absent Listings
+                </div>
+              </div>
+
+              {/* Micro KPI widgets row inside the tab */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                <div className="bg-slate-50/50 rounded-xl p-3 border border-slate-150 flex items-center justify-between">
+                  <div>
+                    <span className="block text-[9px] uppercase font-bold text-slate-400 font-mono">Total Pending Revisit</span>
+                    <span className="text-lg font-black text-slate-800">{absentVisits.length} Sites</span>
+                  </div>
+                  <div className="p-2 bg-rose-50 text-rose-600 rounded-lg">
+                    <UserX size={16} />
+                  </div>
+                </div>
+
+                <div className="bg-slate-50/50 rounded-xl p-3 border border-slate-150 flex items-center justify-between">
+                  <div>
+                    <span className="block text-[9px] uppercase font-bold text-slate-400 font-mono">Landmarks Documented</span>
+                    <span className="text-lg font-black text-slate-800">{absentVisits.filter(v => v.nearestLandmark).length} / {absentVisits.length}</span>
+                  </div>
+                  <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+                    <MapPin size={16} />
+                  </div>
+                </div>
+
+                <div className="bg-slate-50/50 rounded-xl p-3 border border-slate-150 flex items-center justify-between">
+                  <div>
+                    <span className="block text-[9px] uppercase font-bold text-slate-400 font-mono">Evidence Photos Snapped</span>
+                    <span className="text-lg font-black text-slate-800">{absentVisits.filter(v => v.photo).length} / {absentVisits.length}</span>
+                  </div>
+                  <div className="p-2 bg-slate-100 text-slate-700 rounded-lg">
+                    📷
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Cards list */}
+            {absentVisits.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-12 text-center" id="empty-absent-state">
+                <div className="text-4xl mb-3">🎉</div>
+                <p className="text-slate-800 font-bold font-sans text-sm">Perfect Attendance Record</p>
+                <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                  No client absent visits registered! All scheduled site syncs were registered with active customers on-site.
                 </p>
               </div>
-              <div className="text-xs bg-slate-100 px-3 py-1.5 rounded-full text-slate-600 font-bold font-mono">
-                {visits.filter(v => v.customerNotAvailable === true).length} Absent Listings
-              </div>
-            </div>
-
-            {/* Micro KPI widgets row inside the tab */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-              <div className="bg-slate-50/50 rounded-xl p-3 border border-slate-150 flex items-center justify-between">
-                <div>
-                  <span className="block text-[9px] uppercase font-bold text-slate-400 font-mono">Total Pending Revisit</span>
-                  <span className="text-lg font-black text-slate-800">{visits.filter(v => v.customerNotAvailable === true).length} Sites</span>
-                </div>
-                <div className="p-2 bg-rose-50 text-rose-600 rounded-lg">
-                  <UserX size={16} />
-                </div>
-              </div>
-
-              <div className="bg-slate-50/50 rounded-xl p-3 border border-slate-150 flex items-center justify-between">
-                <div>
-                  <span className="block text-[9px] uppercase font-bold text-slate-400 font-mono">Landmarks Documented</span>
-                  <span className="text-lg font-black text-slate-800">{visits.filter(v => v.customerNotAvailable === true && v.nearestLandmark).length} / {visits.filter(v => v.customerNotAvailable === true).length}</span>
-                </div>
-                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
-                  <MapPin size={16} />
-                </div>
-              </div>
-
-              <div className="bg-slate-50/50 rounded-xl p-3 border border-slate-150 flex items-center justify-between">
-                <div>
-                  <span className="block text-[9px] uppercase font-bold text-slate-400 font-mono">Evidence Photos Snapped</span>
-                  <span className="text-lg font-black text-slate-800">{visits.filter(v => v.customerNotAvailable === true && v.photo).length} / {visits.filter(v => v.customerNotAvailable === true).length}</span>
-                </div>
-                <div className="p-2 bg-slate-100 text-slate-700 rounded-lg">
-                  📷
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Cards list */}
-          {visits.filter(v => v.customerNotAvailable === true).length === 0 ? (
-            <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-12 text-center" id="empty-absent-state">
-              <div className="text-4xl mb-3">🎉</div>
-              <p className="text-slate-800 font-bold font-sans text-sm">Perfect Attendance Record</p>
-              <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                No client absent visits registered! All scheduled site syncs were registered with active customers on-site.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6" id="absent-site-grid">
-              {visits.filter(v => v.customerNotAvailable === true).map((visit) => {
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6" id="absent-site-grid">
+                {absentVisits.map((visit) => {
                 const isHot = visit.leadStatus === 'hot';
                 
                 // Format phone number specifically for WhatsApp (using 91 code for India if no country code exists)
@@ -4269,7 +4274,6 @@ Report generated locally from zone sync.`;
               })}
             </div>
           )}
-
         </div>
       )}
 
@@ -4491,7 +4495,7 @@ Report generated locally from zone sync.`;
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-fade-in">
                     {filteredDealers.map((dealer) => {
                       const cleanPhone = dealer.mobile.replace(/\D/g, '');
-                      const customizedText = `Hello ${dealer.name}, this is VANM PLY sales representative following up regarding updates of dealer point: ${dealer.dealerPointName} at ${dealer.place}.`;
+                      const customizedText = `Hello ${dealer.name}, this is a sales representative following up regarding updates of dealer point: ${dealer.dealerPointName} at ${dealer.place}.`;
 
                       return (
                         <div
@@ -5019,7 +5023,7 @@ Report generated locally from zone sync.`;
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100">
+                        <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-slate-100">
                           {/* Details sheet button */}
                           <button
                             type="button"
@@ -5029,10 +5033,11 @@ Report generated locally from zone sync.`;
                                 data: customer
                               });
                             }}
-                            className="py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                            title="Detailed Logs"
+                            className="py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
                           >
                             <Eye size={11} className="text-slate-500" />
-                            <span>Detailed Logs</span>
+                            <span>Logs</span>
                           </button>
 
                           {/* Restore direct shortcut button */}
@@ -5043,10 +5048,26 @@ Report generated locally from zone sync.`;
                                 await onToggleCompleteCustomer(customer.mobile, false);
                               }
                             }}
-                            className="py-1.5 bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-700 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                            title="Restore Active"
+                            className="py-1.5 bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-700 rounded-lg text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
                           >
                             <RefreshCw size={11} className="text-teal-650" />
-                            <span>Restore Active</span>
+                            <span>Restore</span>
+                          </button>
+
+                          {/* Permanently delete shortcut button */}
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (onDeleteCustomer) {
+                                await onDeleteCustomer(customer.mobile);
+                              }
+                            }}
+                            title="Permanently Delete"
+                            className="py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-lg text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <Trash2 size={11} className="text-rose-600" />
+                            <span>Delete</span>
                           </button>
                         </div>
                       </div>
@@ -5473,15 +5494,15 @@ Report generated locally from zone sync.`;
                           cleanPh = '91' + cleanPh.substring(1);
                         }
                         
-                        let customText = `hello ${selectedDirItem.data.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`;
+                        let customText = `hello ${selectedDirItem.data.name} garu,how are you.projects going well, Regards`;
                         if (selectedDirItem.type === 'customer') {
-                          customText = `hello ${selectedDirItem.data.name} garu,i recently visited your site, work progress is good 👍, VANM PLYWOOD.thank you sir.`;
+                          customText = `hello ${selectedDirItem.data.name} garu,i recently visited your site, work progress is good 👍.thank you sir.`;
                         } else if (selectedDirItem.type === 'carpenter') {
-                          customText = `hello ${selectedDirItem.data.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`;
+                          customText = `hello ${selectedDirItem.data.name} garu,how are you.projects going well, Regards`;
                         } else if (selectedDirItem.type === 'architect') {
-                          customText = `hello ${selectedDirItem.data.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`;
+                          customText = `hello ${selectedDirItem.data.name} garu,how are you.projects going well, Regards`;
                         } else if (selectedDirItem.type === 'interior') {
-                          customText = `hello ${selectedDirItem.data.name} garu,how are you.projects going well.VANM PLYWOOD, Regards`;
+                          customText = `hello ${selectedDirItem.data.name} garu,how are you.projects going well, Regards`;
                         }
 
                         setWhatsappSelectModal({

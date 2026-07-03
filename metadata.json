@@ -1,6 +1,6 @@
 {
-  "name": "VANM PLY - Sales Tracker",
-  "description": "Daily visit tracker for VANM PLY sales executives, recording site visits, contacts, and lead status.",
+  "name": "Sales Tracker Pro",
+  "description": "Daily visit tracker for sales executives, recording site visits, contacts, and lead status.",
   "requestFramePermissions": ["geolocation", "camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

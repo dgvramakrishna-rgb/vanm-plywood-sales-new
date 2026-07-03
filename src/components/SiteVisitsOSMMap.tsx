@@ -347,7 +347,7 @@ export default function SiteVisitsOSMMap({ visits, onEditVisit, onCompleteVisit,
                             } else {
                               const mobile = visit.clientMobile || '';
                               const cleanPhone = mobile.replace(/\D/g, '').length === 10 ? '91' + mobile.replace(/\D/g, '') : mobile.replace(/\D/g, '');
-                              const text = encodeURIComponent(`Hello ${visit.clientName} garu, I recently visited your site, work progress is good 👍. VANM PLYWOOD. Thank you sir.`);
+                              const text = encodeURIComponent(`Hello ${visit.clientName} garu, I recently visited your site, work progress is good 👍. Thank you sir.`);
                               window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
                             }
                           }}

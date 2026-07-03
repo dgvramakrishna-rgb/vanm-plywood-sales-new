@@ -86,7 +86,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
             PRO EXECUTIVE WORKSPACE
           </div>
           <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight text-center font-display">
-            VANM <span className="text-orange-600 font-extrabold font-sans">PLY</span>
+            SALES <span className="text-orange-600 font-extrabold font-sans">TRACKER</span>
           </h2>
           <p className="mt-1.5 text-[9px] text-slate-500 dark:text-slate-400 font-extrabold uppercase font-mono tracking-widest text-center">
             CRM Cloud Sync & Executive Tracker

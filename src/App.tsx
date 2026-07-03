@@ -139,7 +139,7 @@ export default function App() {
   // Top header Profile settings dropdown states
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [profName, setProfName] = useState(currentUser?.name || '');
-  const [profCompany, setProfCompany] = useState(currentUser?.companyName || 'VANM PLY Pro');
+  const [profCompany, setProfCompany] = useState(currentUser?.companyName || 'Sales Pro');
   const [profMobile, setProfMobile] = useState(currentUser?.mobile || '');
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
 
@@ -147,7 +147,7 @@ export default function App() {
   useEffect(() => {
     if (currentUser) {
       setProfName(currentUser.name);
-      setProfCompany(currentUser.companyName || 'VANM PLY Pro');
+      setProfCompany(currentUser.companyName || 'Sales Pro');
       setProfMobile(currentUser.mobile);
     }
   }, [currentUser]);
@@ -472,7 +472,7 @@ export default function App() {
             <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
               <div>
                 <span className="font-display font-black text-lg leading-none tracking-tight text-white block flex items-center gap-1">
-                  VANM <span className="text-orange-400 font-black">PLY</span> <span className="font-mono text-[9px] font-bold opacity-80 bg-white/10 px-1.5 py-0.5 rounded ml-1 tracking-wider uppercase">PRO</span>
+                  SALES <span className="text-orange-400 font-black">TRACKER</span> <span className="font-mono text-[9px] font-bold opacity-80 bg-white/10 px-1.5 py-0.5 rounded ml-1 tracking-wider uppercase">PRO</span>
                 </span>
                 <span className="text-[8px] uppercase tracking-widest font-black text-indigo-200/90 font-mono hidden sm:block mt-0.5">
                   CRM Field Sync Active
