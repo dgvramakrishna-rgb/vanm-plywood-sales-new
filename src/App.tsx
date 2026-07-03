@@ -247,10 +247,9 @@ export default function App() {
       try {
         // 1. Instantly load local/cached visits to make the app interactive immediately
         const cached = await getLocalVisits();
-        if (cached && cached.length > 0) {
-          setVisits(cached);
-          setIsLoading(false);
-        }
+        setVisits(cached || []);
+        setIsLoading(false); // Set to false immediately so the app is instantly interactive!
+
         const cachedD = localStorage.getItem('fieldconnect_dealers_cache');
         if (cachedD) {
           try {
@@ -263,7 +262,7 @@ export default function App() {
           console.warn("Background firebase connection verification warn:", err);
         });
 
-        // 3. Keep loading state up-to-date with remote server changes
+        // 3. Keep loading state up-to-date with remote server changes in the background
         const records = await getAllVisits();
         // Automatically purge any previously seeded records matching 'seed-visit' to ensure a perfectly clean user DB
         const seedVisits = records.filter(v => v.id.startsWith('seed-visit'));

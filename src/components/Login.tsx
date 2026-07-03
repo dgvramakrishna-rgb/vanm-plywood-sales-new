@@ -17,6 +17,25 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   const [fullName, setFullName] = useState('');
   const [zone, setZone] = useState('Central HQ');
 
+  // Promise Timeout helper to prevent Firestore from hanging on slow mobile networks
+  const withTimeout = <T,>(promise: Promise<T>, ms: number, errorMessage: string): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(errorMessage));
+      }, ms);
+
+      promise
+        .then((res) => {
+          clearTimeout(timer);
+          resolve(res);
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+    });
+  };
+
   // Multi-step handler
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,8 +51,12 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 
     try {
       if (!needsRegistration) {
-        // Step 1: Look up user in Firestore
-        const existingUser = await fetchUserFromFirestore(cleanMobile);
+        // Step 1: Look up user in Firestore with a 4-second timeout
+        const existingUser = await withTimeout(
+          fetchUserFromFirestore(cleanMobile),
+          4000,
+          "Connection timed out"
+        );
         if (existingUser) {
           // User exists! Auto login
           onLoginSuccess({
@@ -60,20 +83,31 @@ export default function Login({ onLoginSuccess }: LoginProps) {
           zone: zone
         };
 
-        await saveUserToFirestore(newUserPayload);
+        // Attempt registration with a 4-second timeout
+        await withTimeout(
+          saveUserToFirestore(newUserPayload),
+          4000,
+          "Registration connection timed out"
+        );
         onLoginSuccess(newUserPayload);
       }
     } catch (err: any) {
-      console.error(err);
-      setError('Connection to Firestore failed. Falling back to local profile session.');
-      // Offline fallback
-      onLoginSuccess({
-        name: fullName || `Executive (${cleanMobile.slice(-4)})`,
-        mobile: cleanMobile,
-        zone: zone || 'Local Field HQ'
-      });
+      console.warn("Firestore authentication issue, falling back to local session:", err);
+      setError('Database connection timed out or is unreachable. Logging in with a local offline session.');
+      
+      // Delay slightly to let the user read the error/info before redirection
+      setTimeout(() => {
+        onLoginSuccess({
+          name: fullName || `Executive (${cleanMobile.slice(-4)})`,
+          mobile: cleanMobile,
+          zone: zone || 'Local Field HQ'
+        });
+      }, 1500);
     } finally {
-      setIsLoggingIn(false);
+      // Keep loading indicator active if redirecting, otherwise set to false
+      setTimeout(() => {
+        setIsLoggingIn(false);
+      }, 1500);
     }
   };
 
