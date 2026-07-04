@@ -991,8 +991,42 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
               </AnimatePresence>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Pincode Field & Autocomplete */}
+                <div className="mt-3">
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 font-sans">
+                    Pincode
+                  </label>
+                  <div className="relative font-sans">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                      <MapPin size={16} />
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Enter 6-digit Pincode"
+                      value={pincode}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                        setPincode(val);
+                        if (val.length === 6) {
+                          fetch(`https://api.postalpincode.in/pincode/${val}`)
+                            .then(res => res.json())
+                            .then(data => {
+                              if (data && data[0].Status === 'Success') {
+                                const po = data[0].PostOffice[0];
+                                setAddress(prev => prev ? `${prev}, ${po.Name}, ${po.District}` : `${po.Name}, ${po.District}`);
+                                setLocation(po.Taluk);
+                              }
+                            })
+                            .catch(console.error);
+                        }
+                      }}
+                      className="w-full pl-9 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 transition font-sans font-medium"
+                    />
+                  </div>
+                </div>
+
                 {/* Site Address field */}
-                <div className="space-y-1.5" id="container-site-address">
+                <div className="space-y-1.5 mt-3" id="container-site-address">
                   <div className="flex justify-between items-center h-5">
                     <p className="block text-xs font-semibold text-slate-650 font-sans">
                       City / Village (Place) *

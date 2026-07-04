@@ -72,23 +72,50 @@ export async function shareVisitDetails({ title, text, url, photo, photoOnly }: 
           const blob = await response.blob();
           const file = new File([blob], 'site-photo.jpg', { type: 'image/jpeg' });
           
-          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          const candidateParams = {
+            ...shareParams,
+            files: [file]
+          };
+
+          if (navigator.canShare && navigator.canShare(candidateParams)) {
             shareParams.files = [file];
-            
-            if (photoOnly) {
-              delete shareParams.text;
-              delete shareParams.title;
-            }
           }
         } catch (e) {
           console.warn('Web: Failed to prepare photo for sharing:', e);
         }
       }
 
-      // If we are sharing files, some browsers work better if url is merged into text
-      // but others want it separately. Keeping it consistent for now.
-      if (url && !shareParams.files) {
-        shareParams.url = url;
+      // Handle URL parameter
+      if (url) {
+        if (!shareParams.files) {
+          shareParams.url = url;
+        } else {
+          // If we have files, check if we can share both files and URL
+          const candidateWithUrl = {
+            ...shareParams,
+            url
+          };
+          if (navigator.canShare && navigator.canShare(candidateWithUrl)) {
+            shareParams.url = url;
+          }
+        }
+      }
+
+      // Safety check: ensure at least one known standard field is present
+      if (!shareParams.title && !shareParams.text && !shareParams.url) {
+        shareParams.title = title || 'Site Detail';
+        shareParams.text = whatsappText;
+      }
+
+      // Perform final feature detection on the exact parameters to be shared
+      if (navigator.canShare && !navigator.canShare(shareParams)) {
+        // If the combined check fails, strip files to fall back to a safe text/url share
+        delete shareParams.files;
+        if (url) {
+          shareParams.url = url;
+        }
+        shareParams.title = title || 'Site Detail';
+        shareParams.text = whatsappText;
       }
 
       await navigator.share(shareParams);

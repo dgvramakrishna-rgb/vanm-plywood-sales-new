@@ -50,6 +50,8 @@ import { calculateDistance } from '../utils/geoUtils';
 import { SitePhotoItem } from './SitePhotoItem';
 import SiteVisitsMap from './SiteVisitsMap';
 import SiteVisitsOSMMap from './SiteVisitsOSMMap';
+import ContactsUploader, { ContactItem } from './ContactsUploader';
+import CallManager from './CallManager';
 import { 
   requestNotificationPermission, 
   getNotificationPermissionStatus, 
@@ -110,9 +112,23 @@ export default function Dashboard({
   const todayStr = new Date().toISOString().split('T')[0];
   const absentVisits = visits.filter(v => v.customerNotAvailable === true && !v.isCompleted);
   
-  // Navigation tab state within the Home Page: overview, followups, reports, absent, places, dealers, completed, partners
-  const [activeHomeTab, setActiveHomeTab] = useState<'overview' | 'followups' | 'reports' | 'absent' | 'places' | 'dealers' | 'completed' | 'partners' | 'map'>('overview');
-  const [mapType, setMapType] = useState<'google' | 'osm'>('google');
+  // Navigation tab state within the Home Page: overview, followups, reports, absent, places, dealers, completed, partners, call
+  const [activeHomeTab, setActiveHomeTab] = useState<'overview' | 'followups' | 'reports' | 'absent' | 'places' | 'dealers' | 'completed' | 'partners' | 'map' | 'call'>('overview');
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [mapType, setMapType] = useState<'google' | 'osm'>('osm');
+  
+  const unsyncedCount = visits.filter(v => v.synced !== true).length;
+
+  React.useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
   const [dealersSearchQuery, setDealersSearchQuery] = useState('');
   const [completedSearchQuery, setCompletedSearchQuery] = useState('');
   const [placesSearchQuery, setPlacesSearchQuery] = useState('');
@@ -1439,8 +1455,13 @@ Report generated locally from zone sync.`;
       <div className="bg-gradient-to-br from-indigo-900 via-indigo-950 to-slate-900 rounded-xl p-4 md:p-5 text-white shadow-md flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative overflow-hidden border border-indigo-950">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-indigo-500/20 to-transparent pointer-events-none" />
         <div className="space-y-1 relative z-10">
+          {!isOnline && unsyncedCount > 50 && (
+            <div className="bg-red-600 text-white p-3 rounded-lg mb-3 font-bold text-xs border border-red-500 animate-pulse">
+              ⚠️ WARNING: Offline mode with {unsyncedCount} unsynced records! Connect to internet to sync data and prevent loss.
+            </div>
+          )}
           <span className="bg-white/10 text-indigo-250 font-mono text-[8px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded border border-white/15">
-            Cloud Sync Status: Active
+            Cloud Sync Status: {isOnline ? 'Active' : 'Offline'}
           </span>
           <h1 className="text-xl md:text-2xl font-extrabold font-display tracking-tight text-white m-0">
             Field Workspace Dashboard
@@ -1560,6 +1581,19 @@ Report generated locally from zone sync.`;
           >
             <CheckSquare size={18} className={activeHomeTab === 'completed' ? 'text-white' : 'text-emerald-500'} />
             <span className="text-center">Done</span>
+          </button>
+
+          <button
+            onClick={() => setActiveHomeTab('call')}
+            className={`p-3 rounded-xl text-[10px] font-extrabold flex flex-col items-center justify-center gap-2 transition cursor-pointer font-sans border ${
+              activeHomeTab === 'call'
+                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                : 'bg-slate-50 text-slate-600 border-slate-100 hover:bg-white hover:border-indigo-200'
+            }`}
+            id="opt-tab-call"
+          >
+            <Phone size={18} className={activeHomeTab === 'call' ? 'text-white' : 'text-indigo-500'} />
+            <span className="text-center">Follow Up</span>
           </button>
         </div>
       </div>
@@ -1694,60 +1728,21 @@ Report generated locally from zone sync.`;
                     </div>
                   )}
                 </div>
-
-                <div className="flex items-center gap-2 p-1 bg-indigo-700/50 rounded-xl border border-indigo-500/30">
-                <button
-                  onClick={() => setMapType('google')}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1.5 ${
-                    mapType === 'google' 
-                      ? 'bg-white text-indigo-700 shadow-sm' 
-                      : 'text-indigo-100 hover:bg-indigo-600'
-                  }`}
-                >
-                  <MapIcon size={12} />
-                  Google Maps
-                </button>
-                <button
-                  onClick={() => setMapType('osm')}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1.5 ${
-                    mapType === 'osm' 
-                      ? 'bg-white text-indigo-700 shadow-sm' 
-                      : 'text-indigo-100 hover:bg-indigo-600'
-                  }`}
-                >
-                  <Layers size={12} />
-                  OpenStreetMap
-                </button>
               </div>
             </div>
-          </div>
             
-          <div className="relative h-[650px] w-full">
-              {mapType === 'google' ? (
-                <SiteVisitsMap 
-                  visits={visits.filter(v => !v.isCompleted)} 
-                  onEditVisit={onEditVisit}
-                  onCompleteVisit={async (visit) => {
-                    if (onToggleCompleteCustomer) {
-                      await onToggleCompleteCustomer(visit.clientMobile, true);
-                    }
-                  }}
-                  onWhatsApp={handleMapWhatsApp}
-                  onViewHistory={handleMapViewHistory}
-                />
-              ) : (
-                <SiteVisitsOSMMap 
-                  visits={visits.filter(v => !v.isCompleted)} 
-                  onEditVisit={onEditVisit}
-                  onCompleteVisit={async (visit) => {
-                    if (onToggleCompleteCustomer) {
-                      await onToggleCompleteCustomer(visit.clientMobile, true);
-                    }
-                  }}
-                  onWhatsApp={handleMapWhatsApp}
-                  onViewHistory={handleMapViewHistory}
-                />
-              )}
+            <div className="relative h-[650px] w-full">
+              <SiteVisitsOSMMap 
+                visits={visits.filter(v => !v.isCompleted)} 
+                onEditVisit={onEditVisit}
+                onCompleteVisit={async (visit) => {
+                  if (onToggleCompleteCustomer) {
+                    await onToggleCompleteCustomer(visit.clientMobile, true);
+                  }
+                }}
+                onWhatsApp={handleMapWhatsApp}
+                onViewHistory={handleMapViewHistory}
+              />
             </div>
           </div>
         </div>
@@ -4943,6 +4938,10 @@ Report generated locally from zone sync.`;
             </div>
           </div>
         </div>
+      )}
+
+      {activeHomeTab === 'call' && (
+        <CallManager />
       )}
 
       {activeHomeTab === 'completed' && (

@@ -59,6 +59,7 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit, on
   const [zoom, setZoom] = useState(5);
   const [selectedVisit, setSelectedVisit] = useState<SiteVisit | null>(null);
   const [fullPhoto, setFullPhoto] = useState<string | null>(null);
+  const [mapViewMode, setMapViewMode] = useState<'clients' | 'carpenters'>('clients');
 
   useEffect(() => {
     handleDetectLocation();
@@ -155,24 +156,59 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit, on
     );
   }
 
-  const visitsWithCoords = visits.filter(v => v.latitude && v.longitude);
+  const carpentersVisits = visits.filter(v => 
+    (v.carpenterName && v.carpenterName.trim().length > 0) || 
+    (v.contractorType === 'carpenter' && v.contractorName && v.contractorName.trim().length > 0)
+  );
+
+  const visitsToMap = mapViewMode === 'clients' ? visits : carpentersVisits;
+  const visitsWithCoords = visitsToMap.filter(v => v.latitude && v.longitude);
 
   return (
     <div className="flex flex-col h-full bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-      <div className="bg-slate-50/80 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-indigo-600"></div>
-          <span className="text-[11px] font-black uppercase text-slate-500 font-mono tracking-wider">
-            Site Location Dashboard
-          </span>
-          <span className="text-[9px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold">
-            {visitsWithCoords.length} Marked
+      <div className="bg-slate-50/80 px-4 py-3 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-pulse"></div>
+            <span className="text-[11px] font-black uppercase text-slate-500 font-mono tracking-wider">
+              Site Location Dashboard
+            </span>
+          </div>
+
+          {/* Map View Mode Segmented Controls */}
+          <div className="flex bg-slate-200/80 p-0.5 rounded-xl border border-slate-300/40">
+            <button
+              type="button"
+              onClick={() => setMapViewMode('clients')}
+              className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer ${
+                mapViewMode === 'clients' 
+                  ? 'bg-white text-indigo-700 shadow-xs border border-indigo-100/50' 
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>👤</span> Clients ({visits.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setMapViewMode('carpenters')}
+              className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer ${
+                mapViewMode === 'carpenters' 
+                  ? 'bg-white text-indigo-700 shadow-xs border border-indigo-100/50' 
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>🪚</span> Carpenters ({carpentersVisits.length})
+            </button>
+          </div>
+
+          <span className="text-[9px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-extrabold">
+            {visitsWithCoords.length} on Map
           </span>
         </div>
         <button
           onClick={handleDetectLocation}
           disabled={isLocating}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700 hover:bg-slate-50 transition shadow-xs cursor-pointer"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700 hover:bg-slate-50 transition shadow-xs cursor-pointer w-fit"
         >
           <Crosshair size={12} className={isLocating ? 'animate-spin' : ''} />
           {isLocating ? 'Locating...' : 'My Location'}
@@ -218,153 +254,215 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit, on
             )}
 
             {/* Site markers */}
-            {visitsWithCoords.map((visit) => (
-              <AdvancedMarker 
-                key={visit.id} 
-                position={{ lat: visit.latitude!, lng: visit.longitude! }}
-                onClick={() => setSelectedVisit(visit)}
-              >
-                <div className="group relative cursor-pointer">
-                  <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-white px-2 py-1 rounded shadow-lg border border-slate-200 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
-                    <p className="text-[10px] font-bold text-slate-900">{visit.clientName}</p>
-                    <p className="text-[8px] text-slate-500">{visit.location}</p>
+            {visitsWithCoords.map((visit) => {
+              const carpName = visit.carpenterName || (visit.contractorType === 'carpenter' ? visit.contractorName : '') || 'No Carpenter';
+              const isCarpMode = mapViewMode === 'carpenters';
+
+              return (
+                <AdvancedMarker 
+                  key={visit.id} 
+                  position={{ lat: visit.latitude!, lng: visit.longitude! }}
+                  onClick={() => setSelectedVisit(visit)}
+                >
+                  <div className="group relative cursor-pointer">
+                    <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-white px-2 py-1 rounded shadow-lg border border-slate-200 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                      <p className="text-[10px] font-bold text-slate-900">
+                        {isCarpMode ? `🪚 ${carpName}` : visit.clientName}
+                      </p>
+                      <p className="text-[8px] text-slate-500">
+                        {isCarpMode ? `Client: ${visit.clientName}` : visit.location}
+                      </p>
+                    </div>
+                    <Pin 
+                      background={isCarpMode ? '#f59e0b' : getMarkerColor(visit).bg} 
+                      glyph={isCarpMode ? '🪚' : undefined}
+                      glyphColor="#ffffff" 
+                      borderColor={isCarpMode ? '#b45309' : getMarkerColor(visit).border}
+                      scale={0.9} 
+                    />
                   </div>
-                  <Pin 
-                    background={getMarkerColor(visit).bg} 
-                    glyphColor="#ffffff" 
-                    borderColor={getMarkerColor(visit).border}
-                    scale={0.9} 
-                  />
-                </div>
-              </AdvancedMarker>
-            ))}
+                </AdvancedMarker>
+              );
+            })}
 
             {/* Info Window for selected visit */}
-            {selectedVisit && (
-              <InfoWindow
-                position={{ lat: selectedVisit.latitude!, lng: selectedVisit.longitude! }}
-                onCloseClick={() => setSelectedVisit(null)}
-                headerContent={
-                  <div className="flex items-center gap-2 pr-4">
-                    <div className={`w-2 h-2 rounded-full ${getMarkerColor(selectedVisit).bg === '#ef4444' ? 'bg-rose-500' : 'bg-indigo-600'}`}></div>
-                    <span className="text-xs font-black uppercase text-slate-500 font-mono tracking-tight">Visit Details</span>
-                  </div>
-                }
-              >
-                <div className="w-[300px] p-1 font-sans">
-                  {selectedVisit.photo && (
-                    <div className="mb-3">
-                      <SitePhotoItem 
-                        visit={selectedVisit} 
-                        onEnlarge={(photo) => setFullPhoto(photo)}
-                        className="relative w-full h-32 rounded-xl overflow-hidden shadow-inner cursor-zoom-in group bg-slate-50 border border-slate-100"
-                        imageClassName="w-full h-full object-cover group-hover:scale-105 duration-200"
-                      />
-                    </div>
-                  )}
+            {selectedVisit && (() => {
+              const carpName = selectedVisit.carpenterName || (selectedVisit.contractorType === 'carpenter' ? selectedVisit.contractorName : '') || 'No Carpenter';
+              const carpMobile = selectedVisit.carpenterMobile || (selectedVisit.contractorType === 'carpenter' ? selectedVisit.contractorMobile : '') || '';
+              const carpPlace = selectedVisit.carpenterPlace || (selectedVisit.contractorType === 'carpenter' ? selectedVisit.contractorAddress : '') || 'N/A';
+              const isCarpMode = mapViewMode === 'carpenters';
 
-                  <div className="space-y-2.5">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h3 className="text-sm font-black text-slate-900 flex items-center gap-1.5 leading-tight">
-                          {selectedVisit.clientName}
-                        </h3>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          <MapPin size={10} className="text-slate-400" />
-                          <p className="text-[10px] text-slate-500 font-medium">{selectedVisit.address || selectedVisit.location}</p>
-                        </div>
-                      </div>
-                      <button 
-                        onClick={() => onEditVisit?.(selectedVisit)}
-                        className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition"
-                        title="Edit Visit"
-                      >
-                        <Edit2 size={12} />
-                      </button>
+              return (
+                <InfoWindow
+                  position={{ lat: selectedVisit.latitude!, lng: selectedVisit.longitude! }}
+                  onCloseClick={() => setSelectedVisit(null)}
+                  headerContent={
+                    <div className="flex items-center gap-2 pr-4">
+                      <div className={`w-2 h-2 rounded-full ${isCarpMode ? 'bg-amber-500' : (getMarkerColor(selectedVisit).bg === '#ef4444' ? 'bg-rose-500' : 'bg-indigo-600')}`}></div>
+                      <span className="text-xs font-black uppercase text-slate-500 font-mono tracking-tight">
+                        {isCarpMode ? 'Carpenter & Client Details' : 'Visit Details'}
+                      </span>
                     </div>
+                  }
+                >
+                  <div className="w-[300px] p-1 font-sans">
+                    {selectedVisit.photo && (
+                      <div className="mb-3">
+                        <SitePhotoItem 
+                          visit={selectedVisit} 
+                          onEnlarge={(photo) => setFullPhoto(photo)}
+                          className="relative w-full h-32 rounded-xl overflow-hidden shadow-inner cursor-zoom-in group bg-slate-50 border border-slate-100"
+                          imageClassName="w-full h-full object-cover group-hover:scale-105 duration-200"
+                        />
+                      </div>
+                    )}
 
-                    <div className="grid grid-cols-2 gap-2 py-2 border-y border-slate-100">
-                      <div className="space-y-0.5">
-                        <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Building Type</p>
-                        <div className="flex items-center gap-1">
-                          <Home size={10} className="text-indigo-500" />
-                          <span className="text-[10px] font-bold text-slate-700">{selectedVisit.buildingType || 'N/A'}</span>
+                    <div className="space-y-2.5">
+                      {isCarpMode ? (
+                        <div className="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200">
+                          <p className="text-[9px] font-black uppercase text-amber-800 tracking-wider font-mono">Associated Carpenter</p>
+                          <h4 className="text-xs font-black text-slate-900 m-0 leading-tight flex items-center gap-1.5 mt-0.5">
+                            <span>🪚</span> {carpName}
+                          </h4>
+                          {carpPlace && (
+                            <p className="text-[8px] text-slate-500 font-medium m-0 mt-0.5">Base: {carpPlace}</p>
+                          )}
                         </div>
-                      </div>
-                      <div className="space-y-0.5 text-right">
-                        <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Contact No.</p>
-                        <div className="flex items-center justify-end gap-1">
-                          <Phone size={10} className="text-emerald-500" />
-                          <span className="text-[10px] font-bold text-slate-700">{selectedVisit.clientMobile || 'N/A'}</span>
-                        </div>
-                      </div>
-                    </div>
+                      ) : null}
 
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <Calendar size={10} className="text-slate-400" />
-                          <span className="text-[10px] text-slate-600 font-bold">{selectedVisit.visitingDate}</span>
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider font-mono">Client Details</p>
+                          <h3 className="text-sm font-black text-slate-900 flex items-center gap-1.5 leading-tight mt-0.5">
+                            {selectedVisit.clientName}
+                          </h3>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <MapPin size={10} className="text-slate-400" />
+                            <p className="text-[10px] text-slate-500 font-medium">{selectedVisit.address || selectedVisit.location}</p>
+                          </div>
                         </div>
-                        <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase ${
-                          selectedVisit.leadStatus === 'hot' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700'
-                        }`}>
-                          {selectedVisit.leadStatus} Lead
-                        </span>
+                        <button 
+                          onClick={() => onEditVisit?.(selectedVisit)}
+                          className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition shrink-0"
+                          title="Edit Visit"
+                        >
+                          <Edit2 size={12} />
+                        </button>
                       </div>
-                      {selectedVisit.customerNotAvailable && (
-                        <div className="flex items-center gap-1.5 bg-rose-50 px-2 py-1 rounded border border-rose-100 mt-1">
-                          <User size={10} className="text-rose-500" />
-                          <span className="text-[9px] font-bold text-rose-700">Customer was absent</span>
+
+                      <div className="grid grid-cols-2 gap-2 py-2 border-y border-slate-100">
+                        <div className="space-y-0.5">
+                          <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Building Type</p>
+                          <div className="flex items-center gap-1">
+                            <Home size={10} className="text-indigo-500" />
+                            <span className="text-[10px] font-bold text-slate-700">{selectedVisit.buildingType || 'N/A'}</span>
+                          </div>
+                        </div>
+                        <div className="space-y-0.5 text-right">
+                          <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Contact No.</p>
+                          <div className="flex items-center justify-end gap-1">
+                            <Phone size={10} className="text-emerald-500" />
+                            <span className="text-[10px] font-bold text-slate-700">{selectedVisit.clientMobile || 'N/A'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Carpenter Action Panel in Carpenters view */}
+                      {isCarpMode && carpMobile && (
+                        <div className="p-2 rounded-lg bg-orange-50 border border-orange-100 flex items-center justify-between gap-1.5">
+                          <div className="min-w-0">
+                            <p className="text-[8px] font-extrabold uppercase text-orange-700 tracking-wider">Carpenter Mobile</p>
+                            <p className="text-[9px] font-bold text-slate-800 font-mono m-0">{carpMobile}</p>
+                          </div>
+                          <div className="flex gap-1.5">
+                            <a 
+                              href={`tel:${carpMobile}`}
+                              className="p-1.5 bg-white text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-100 transition shadow-xs"
+                              title="Call Carpenter"
+                            >
+                              <Phone size={10} />
+                            </a>
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                const cleanPhone = carpMobile.replace(/\D/g, '').length === 10 ? '91' + carpMobile.replace(/\D/g, '') : carpMobile.replace(/\D/g, '');
+                                const text = encodeURIComponent(`Hello ${carpName} garu, this is regarding the ${selectedVisit.buildingType || 'site'} woodwork at ${selectedVisit.clientName}'s site.`);
+                                window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
+                              }}
+                              className="p-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition shadow-xs"
+                              title="WhatsApp Carpenter"
+                            >
+                              <MessageCircle size={10} />
+                            </button>
+                          </div>
                         </div>
                       )}
-                    </div>
 
-                    <div className="flex flex-col gap-2 pt-1">
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={() => handleNavigate(selectedVisit)}
-                          className="flex-1 bg-indigo-600 text-white py-1.5 rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                        >
-                          <Navigation size={12} />
-                          Navigate
-                        </button>
-                        <a 
-                          href={`tel:${selectedVisit.clientMobile}`}
-                          className="w-10 bg-slate-100 text-slate-700 flex items-center justify-center rounded-lg hover:bg-slate-200 transition"
-                        >
-                          <Phone size={14} />
-                        </a>
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <Calendar size={10} className="text-slate-400" />
+                            <span className="text-[10px] text-slate-600 font-bold">{selectedVisit.visitingDate}</span>
+                          </div>
+                          <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase ${
+                            selectedVisit.leadStatus === 'hot' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700'
+                          }`}>
+                            {selectedVisit.leadStatus} Lead
+                          </span>
+                        </div>
+                        {selectedVisit.customerNotAvailable && (
+                          <div className="flex items-center gap-1.5 bg-rose-50 px-2 py-1 rounded border border-rose-100 mt-1">
+                            <User size={10} className="text-rose-500" />
+                            <span className="text-[9px] font-bold text-rose-700">Customer was absent</span>
+                          </div>
+                        )}
                       </div>
 
-                      <div className="flex gap-2">
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            if (onWhatsApp) {
-                              onWhatsApp(selectedVisit.clientMobile, selectedVisit.clientName);
-                            } else {
-                              const mobile = selectedVisit.clientMobile || '';
-                              const cleanPhone = mobile.replace(/\D/g, '').length === 10 ? '91' + mobile.replace(/\D/g, '') : mobile.replace(/\D/g, '');
-                              const text = encodeURIComponent(`Hello ${selectedVisit.clientName} garu, I recently visited your site, work progress is good 👍. Thank you sir.`);
-                              window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
-                            }
-                          }}
-                          className="flex-1 bg-emerald-600 text-white py-1.5 rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition flex items-center justify-center gap-1.5 shadow-sm"
-                        >
-                          <MessageCircle size={12} />
-                          WhatsApp
-                        </button>
-                        <button 
-                          onClick={() => onViewHistory?.(selectedVisit.clientMobile)}
-                          className="flex-1 bg-indigo-50 text-indigo-700 py-1.5 rounded-lg text-[10px] font-bold border border-indigo-100 hover:bg-indigo-100 transition flex items-center justify-center gap-1.5 shadow-sm"
-                        >
-                          <History size={12} />
-                          Visit Log
-                        </button>
+                      <div className="flex flex-col gap-2 pt-1">
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => handleNavigate(selectedVisit)}
+                            className="flex-1 bg-indigo-600 text-white py-1.5 rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                          >
+                            <Navigation size={12} />
+                            Navigate
+                          </button>
+                          <a 
+                            href={`tel:${selectedVisit.clientMobile}`}
+                            className="w-10 bg-slate-100 text-slate-700 flex items-center justify-center rounded-lg hover:bg-slate-200 transition"
+                          >
+                            <Phone size={14} />
+                          </a>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              if (onWhatsApp) {
+                                onWhatsApp(selectedVisit.clientMobile, selectedVisit.clientName);
+                              } else {
+                                const mobile = selectedVisit.clientMobile || '';
+                                const cleanPhone = mobile.replace(/\D/g, '').length === 10 ? '91' + mobile.replace(/\D/g, '') : mobile.replace(/\D/g, '');
+                                const text = encodeURIComponent(`Hello ${selectedVisit.clientName} garu, I recently visited your site, work progress is good 👍. Thank you sir.`);
+                                window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
+                              }
+                            }}
+                            className="flex-1 bg-emerald-600 text-white py-1.5 rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition flex items-center justify-center gap-1.5 shadow-sm"
+                          >
+                            <MessageCircle size={12} />
+                            WhatsApp Client
+                          </button>
+                          <button 
+                            onClick={() => onViewHistory?.(selectedVisit.clientMobile)}
+                            className="flex-1 bg-indigo-50 text-indigo-700 py-1.5 rounded-lg text-[10px] font-bold border border-indigo-100 hover:bg-indigo-100 transition flex items-center justify-center gap-1.5 shadow-sm"
+                          >
+                            <History size={12} />
+                            Visit Log
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                      
+                        
                       <button 
                         onClick={() => {
                           if (confirm('Mark this visit as completed and remove from active list?')) {
@@ -379,8 +477,9 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit, on
                       </button>
                     </div>
                   </div>
-              </InfoWindow>
-            )}
+                </InfoWindow>
+              );
+            })()}
           </Map>
         </APIProvider>
 
