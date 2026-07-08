@@ -72,6 +72,7 @@ export function useBackgroundSync(onSyncSuccess?: () => void) {
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [unsyncedCount, setUnsyncedCount] = useState<number>(0);
+  const [syncProgress, setSyncProgress] = useState<number>(0);
 
   // Update count of unsynced visits
   const updateUnsyncedCount = useCallback(async () => {
@@ -84,8 +85,11 @@ export function useBackgroundSync(onSyncSuccess?: () => void) {
     if (!navigator.onLine || isSyncing) return;
 
     setIsSyncing(true);
+    setSyncProgress(0);
     try {
-      const result = await syncUnsyncedVisits();
+      const result = await syncUnsyncedVisits((successCount, totalToSync) => {
+        setSyncProgress(Math.round((successCount / totalToSync) * 100));
+      });
       if (result.success > 0) {
         if (onSyncSuccess) {
           onSyncSuccess();
@@ -96,6 +100,10 @@ export function useBackgroundSync(onSyncSuccess?: () => void) {
     } finally {
       await updateUnsyncedCount();
       setIsSyncing(false);
+      // Let the 100% progress state show briefly, then reset
+      setTimeout(() => {
+        setSyncProgress(0);
+      }, 1500);
     }
   }, [isSyncing, updateUnsyncedCount, onSyncSuccess]);
 
@@ -141,6 +149,7 @@ export function useBackgroundSync(onSyncSuccess?: () => void) {
     isOnline,
     isSyncing,
     unsyncedCount,
+    syncProgress,
     triggerSync,
     updateUnsyncedCount
   };

@@ -209,14 +209,84 @@ const builderIconSelected = new L.DivIcon({
   popupAnchor: [0, -42]
 });
 
-// Component to handle map centering and zoom
-function MapController({ center, zoom, selectedVisitId }: { center: [number, number], zoom: number, selectedVisitId: string | null }) {
+// Component to handle map centering, zoom, and maintaining interaction states
+function calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const rLat1 = (lat1 * Math.PI) / 180;
+  const rLat2 = (lat2 * Math.PI) / 180;
+  
+  const y = Math.sin(dLon) * Math.cos(rLat2);
+  const x = Math.cos(rLat1) * Math.sin(rLat2) - Math.sin(rLat1) * Math.cos(rLat2) * Math.cos(dLon);
+  
+  const brng = (Math.atan2(y, x) * 180) / Math.PI;
+  return (brng + 360) % 360;
+}
+
+function MapController({ 
+  center, 
+  zoom, 
+  setCenter, 
+  setZoom, 
+  followMode, 
+  setFollowMode 
+}: { 
+  center: [number, number]; 
+  zoom: number; 
+  setCenter: (c: [number, number]) => void; 
+  setZoom: (z: number) => void;
+  followMode: boolean;
+  setFollowMode: (f: boolean) => void;
+}) {
   const map = useMap();
   
+  // Track zoom/drag events to maintain state without resetting unexpectedly
+  useMapEvents({
+    dragstart: () => {
+      // Suspend follow mode when user manually drags the map
+      setFollowMode(false);
+    },
+    moveend: () => {
+      const currentCenter = map.getCenter();
+      if (!followMode) {
+        setCenter([currentCenter.lat, currentCenter.lng]);
+      }
+    },
+    zoomend: () => {
+      setZoom(map.getZoom());
+      const currentCenter = map.getCenter();
+      if (!followMode) {
+        setCenter([currentCenter.lat, currentCenter.lng]);
+      }
+    }
+  });
+
   useEffect(() => {
-    map.setView(center, zoom);
+    const currentCenter = map.getCenter();
+    const currentZoom = map.getZoom();
+    const distance = Math.sqrt(
+      Math.pow(currentCenter.lat - center[0], 2) + Math.pow(currentCenter.lng - center[1], 2)
+    );
+    if (distance > 0.0001 || currentZoom !== zoom) {
+      map.setView(center, zoom, { animate: true });
+    }
   }, [center, zoom, map]);
 
+  return null;
+}
+
+function MapRotator({ heading, autoRotate }: { heading: number; autoRotate: boolean }) {
+  const map = useMap();
+  useEffect(() => {
+    const container = map.getContainer();
+    if (container) {
+      container.style.transition = 'transform 0.4s ease-out';
+      if (autoRotate) {
+        container.style.transform = `rotate(${-heading}deg)`;
+      } else {
+        container.style.transform = 'rotate(0deg)';
+      }
+    }
+  }, [heading, autoRotate, map]);
   return null;
 }
 
@@ -246,6 +316,17 @@ export default function SiteVisitsOSMMap({
   const [mapViewMode, setMapViewMode] = useState<'clients' | 'carpenters' | 'interiors' | 'builders'>('clients');
   const notifiedVisits = useRef<Set<string>>(new Set());
 
+  // Follow Mode and Heading Auto-rotate states
+  const [followMode, setFollowMode] = useState(true);
+  const [heading, setHeading] = useState(0);
+  const [autoRotate, setAutoRotate] = useState(false);
+  const prevLocRef = useRef<[number, number] | null>(null);
+  const followModeRef = useRef(followMode);
+
+  useEffect(() => {
+    followModeRef.current = followMode;
+  }, [followMode]);
+
   useEffect(() => {
     if (userLocation) {
       visits.forEach(visit => {
@@ -269,6 +350,28 @@ export default function SiteVisitsOSMMap({
     }
   }, [userLocation, visits]);
 
+  // Real-time device orientation / compass tracking
+  useEffect(() => {
+    const handleOrientation = (e: DeviceOrientationEvent) => {
+      if (!autoRotate) return;
+      const webkitHeading = (e as any).webkitCompassHeading;
+      if (webkitHeading !== undefined && webkitHeading !== null) {
+        setHeading(webkitHeading);
+      } else if (e.alpha !== null && e.alpha !== undefined) {
+        setHeading(360 - e.alpha);
+      }
+    };
+
+    if (window.DeviceOrientationEvent) {
+      window.addEventListener('deviceorientation', handleOrientation);
+    }
+    return () => {
+      if (window.DeviceOrientationEvent) {
+        window.removeEventListener('deviceorientation', handleOrientation);
+      }
+    };
+  }, [autoRotate]);
+
   useEffect(() => {
     let watchId: number;
     
@@ -281,7 +384,23 @@ export default function SiteVisitsOSMMap({
         (position) => {
           const loc: [number, number] = [position.coords.latitude, position.coords.longitude];
           setUserLocation(loc);
-          setMapCenter(loc);
+          
+          if (followModeRef.current) {
+            setMapCenter(loc);
+          }
+
+          // Track movement heading
+          let newHeading = heading;
+          if (position.coords.heading !== null && !isNaN(position.coords.heading)) {
+            newHeading = position.coords.heading;
+          } else if (prevLocRef.current) {
+            const dist = calculateDistance(prevLocRef.current[0], prevLocRef.current[1], loc[0], loc[1]);
+            if (dist > 0.005) { // Moved > 5 meters
+              newHeading = calculateBearing(prevLocRef.current[0], prevLocRef.current[1], loc[0], loc[1]);
+            }
+          }
+          setHeading(newHeading);
+          prevLocRef.current = loc;
         },
         (error) => {
           console.warn("Geolocation watch error (OSM):", error.message);
@@ -438,7 +557,15 @@ export default function SiteVisitsOSMMap({
           scrollWheelZoom={true}
           zoomControl={false} // Disable default zoom control
         >
-          <MapController center={mapCenter} zoom={zoom} selectedVisitId={selectedVisitId} />
+          <MapController 
+            center={mapCenter} 
+            zoom={zoom} 
+            setCenter={setMapCenter}
+            setZoom={setZoom}
+            followMode={followMode}
+            setFollowMode={setFollowMode}
+          />
+          <MapRotator heading={heading} autoRotate={autoRotate} />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -770,24 +897,46 @@ export default function SiteVisitsOSMMap({
             </button>
           </div>
 
-          {/* Compass / Orientation */}
+          {/* Compass / Orientation & Auto-rotate */}
           <button 
             onClick={() => {
-              // Resetting map orientation (simulated as North-Up if rotation was supported)
-              // For now, this can act as a North-Up indicator/reset.
+              if (autoRotate) {
+                setAutoRotate(false);
+                setHeading(0);
+              } else {
+                setAutoRotate(true);
+              }
             }}
-            className="bg-white p-2.5 rounded-xl shadow-lg border border-slate-200 flex items-center justify-center relative group cursor-pointer"
-            title="Reset Map Orientation"
+            className={`p-2.5 rounded-xl shadow-lg border transition flex items-center justify-center relative group cursor-pointer ${
+              autoRotate ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+            }`}
+            title={autoRotate ? "Lock North Up" : "Enable Auto-Rotate Heading"}
           >
-            <Compass size={18} className="text-slate-400 group-hover:text-indigo-600 transition" />
-            <div className="absolute -left-16 bg-slate-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap">
-              North Up
+            <div style={{ transform: `rotate(${autoRotate ? heading : 0}deg)`, transition: 'transform 0.3s ease-out' }}>
+              <Compass size={18} className={autoRotate ? 'text-indigo-600' : 'text-slate-400 group-hover:text-indigo-600'} />
+            </div>
+            <div className="absolute -left-20 bg-slate-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap z-[2000]">
+              {autoRotate ? "Lock North Up" : "Auto-Rotate Heading"}
             </div>
             {/* NESW Indicator labels */}
-            <span className="absolute -top-1 text-[8px] font-black text-slate-300">N</span>
-            <span className="absolute -bottom-1 text-[8px] font-black text-slate-300">S</span>
-            <span className="absolute -left-1 text-[8px] font-black text-slate-300">W</span>
-            <span className="absolute -right-1 text-[8px] font-black text-slate-300">E</span>
+            <span className="absolute -top-1 text-[8px] font-black text-slate-400">N</span>
+            <span className="absolute -bottom-1 text-[8px] font-black text-slate-400">S</span>
+            <span className="absolute -left-1 text-[8px] font-black text-slate-400">W</span>
+            <span className="absolute -right-1 text-[8px] font-black text-slate-400">E</span>
+          </button>
+
+          {/* Follow Mode Toggle */}
+          <button 
+            onClick={() => setFollowMode(!followMode)}
+            className={`p-2.5 rounded-xl shadow-lg border transition flex items-center justify-center relative group cursor-pointer ${
+              followMode ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+            }`}
+            title={followMode ? "Disable Follow Mode" : "Enable Follow Mode"}
+          >
+            <Navigation size={18} className={`${followMode ? 'text-emerald-600' : 'text-slate-400'}`} />
+            <div className="absolute -left-20 bg-slate-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap z-[2000]">
+              {followMode ? "Free Nav" : "Follow Me"}
+            </div>
           </button>
 
           {/* Client List Toggle */}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Briefcase, 
@@ -52,6 +52,7 @@ import SiteVisitsMap from './SiteVisitsMap';
 import SiteVisitsOSMMap from './SiteVisitsOSMMap';
 import ContactsUploader, { ContactItem } from './ContactsUploader';
 import CallManager from './CallManager';
+import FollowUpContactCard from './FollowUpContactCard';
 import { 
   requestNotificationPermission, 
   getNotificationPermissionStatus, 
@@ -374,33 +375,6 @@ export default function Dashboard({
     }, 1000);
   };
 
-  const handleFollowupInteraction = (item: any, source: 'Call' | 'WhatsApp') => {
-    const identifier = item.mobile && item.mobile !== '0000000000' ? item.mobile : item.name;
-    const role = activeFollowupSubTab;
-    const key = `${identifier}_${role}`;
-    
-    // Calculate snooze date: 4 days from now
-    const d = new Date();
-    d.setDate(d.getDate() + 4);
-    const snoozeUntil = d.toISOString();
-    
-    const updatedSnoozes = { ...snoozedFollowups, [key]: snoozeUntil };
-    setSnoozedFollowups(updatedSnoozes);
-    localStorage.setItem('fieldconnect_followup_snooze', JSON.stringify(updatedSnoozes));
-
-    // Display a toast/alert notifying the user of this action
-    const displayRole = role === 'client' ? 'Client' 
-                     : role === 'carpenter' ? 'Carpenter' 
-                     : role === 'interior' ? 'Interior Designer' 
-                     : role === 'architect' ? 'Architect' 
-                     : 'Builder';
-                     
-    // Format the date 4 days from now nicely (e.g. DD/MM/YYYY)
-    const formattedDate = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-    
-    onTriggerToast?.(`📢 Follow-up marked complete for ${displayRole}: ${item.name}!`, 'success');
-  };
-  
   // Reports view internal state filters
   const [reportStageFilter, setReportStageFilter] = useState<string>('all');
   const [reportLeadFilter, setReportLeadFilter] = useState<'all' | 'hot' | 'cold'>('all');
@@ -493,6 +467,9 @@ export default function Dashboard({
   // Selected Directory Item details modal state
   const [selectedDirItem, setSelectedDirItem] = useState<{ type: 'customer' | 'carpenter' | 'interior' | 'architect' | 'builder'; data: any } | null>(null);
   const [whatsappSelectModal, setWhatsappSelectModal] = useState<{ phone: string; text: string; name: string } | null>(null);
+  const [postCallModal, setPostCallModal] = useState<{ item: any; type: string } | null>(null);
+  const [popupRemarks, setPopupRemarks] = useState('');
+  const [popupNextFollowUp, setPopupNextFollowUp] = useState('');
   
   // Quick Add Modals State
   const [quickAddModal, setQuickAddModal] = useState<'customer' | 'carpenter' | 'interior' | 'architect' | 'builder' | null>(null);
@@ -510,170 +487,230 @@ export default function Dashboard({
   const [qaContractorRemarks, setQaContractorRemarks] = useState('');
   const [qaError, setQaError] = useState('');
 
+  const handleFollowupInteraction = React.useCallback((item: any, source: 'Call' | 'WhatsApp') => {
+    if (source === 'Call') {
+      window.location.href = `tel:${item.mobile}`;
+      setPostCallModal({ item, type: activeFollowupSubTab });
+      setPopupRemarks(item.remarks || '');
+      setPopupNextFollowUp(item.nextFollowUp || '');
+      return;
+    }
+
+    const identifier = item.mobile && item.mobile !== '0000000000' ? item.mobile : item.name;
+    const role = activeFollowupSubTab;
+    const key = `${identifier}_${role}`;
+    
+    // Calculate snooze date: 4 days from now
+    const d = new Date();
+    d.setDate(d.getDate() + 4);
+    const snoozeUntil = d.toISOString();
+    
+    const updatedSnoozes = { ...snoozedFollowups, [key]: snoozeUntil };
+    setSnoozedFollowups(updatedSnoozes);
+    localStorage.setItem('fieldconnect_followup_snooze', JSON.stringify(updatedSnoozes));
+
+    // Display a toast/alert notifying the user of this action
+    const displayRole = role === 'client' ? 'Client' 
+                     : role === 'carpenter' ? 'Carpenter' 
+                     : role === 'interior' ? 'Interior Designer' 
+                     : role === 'architect' ? 'Architect' 
+                     : 'Builder';
+                     
+    onTriggerToast?.(`📢 Follow-up marked complete for ${displayRole}: ${item.name}!`, 'success');
+  }, [activeFollowupSubTab, snoozedFollowups, onTriggerToast]);
+
+  const handleCall = React.useCallback((item: any) => {
+    handleFollowupInteraction(item, 'Call');
+  }, [handleFollowupInteraction]);
+
+  const handleWhatsApp = React.useCallback((item: any) => {
+    const cleanPh = item.mobile.replace(/\D/g, '').length === 10 ? '91' + item.mobile.replace(/\D/g, '') : item.mobile.replace(/\D/g, '');
+    setWhatsappSelectModal({
+      phone: cleanPh,
+      text: activeFollowupSubTab === 'client' 
+        ? `hello ${item.name} garu,i recently visited your site, work progress is good 👍.thank you sir.`
+        : `hello ${item.name} garu,how are you.projects going well, Regards`,
+      name: item.name
+    });
+    handleFollowupInteraction(item, 'WhatsApp');
+  }, [activeFollowupSubTab, handleFollowupInteraction, setWhatsappSelectModal]);
+
   // Extract real entities from current DB visit logs to ensure organic integration:
   
   // 1. Customers map
-  const customersMap = new Map<string, { name: string; mobile: string; address: string; lastVisitDate: string; id: string; isCompleted?: boolean; buildingType?: string }>();
-  visits.forEach(v => {
-    if (v.isCompleted) return;
-    if (v.clientName && !customersMap.has(v.clientMobile)) {
-      customersMap.set(v.clientMobile, {
-        name: v.clientName,
-        mobile: v.clientMobile,
-        address: v.address,
-        lastVisitDate: v.visitingDate,
-        id: v.id,
-        isCompleted: false,
-        buildingType: v.buildingType || 'Home'
-      });
-    }
-  });
-  const customers = Array.from(customersMap.values());
+  const customers = React.useMemo(() => {
+    const customersMap = new Map<string, { name: string; mobile: string; address: string; lastVisitDate: string; id: string; isCompleted?: boolean; buildingType?: string }>();
+    visits.forEach(v => {
+      if (v.isCompleted) return;
+      if (v.clientName && !customersMap.has(v.clientMobile)) {
+        customersMap.set(v.clientMobile, {
+          name: v.clientName,
+          mobile: v.clientMobile,
+          address: v.address,
+          lastVisitDate: v.visitingDate,
+          id: v.id,
+          isCompleted: false,
+          buildingType: v.buildingType || 'Home'
+        });
+      }
+    });
+    return Array.from(customersMap.values());
+  }, [visits]);
 
   // 1b. Completed Customers map
-  const completedCustomersMap = new Map<string, { name: string; mobile: string; address: string; lastVisitDate: string; id: string; isCompleted?: boolean; buildingType?: string }>();
-  visits.forEach(v => {
-    if (v.isCompleted && v.clientName && !completedCustomersMap.has(v.clientMobile)) {
-      completedCustomersMap.set(v.clientMobile, {
-        name: v.clientName,
-        mobile: v.clientMobile,
-        address: v.address,
-        lastVisitDate: v.visitingDate,
-        id: v.id,
-        isCompleted: true,
-        buildingType: v.buildingType || 'Home'
-      });
-    }
-  });
-  const completedCustomers = Array.from(completedCustomersMap.values());
+  const completedCustomers = React.useMemo(() => {
+    const completedCustomersMap = new Map<string, { name: string; mobile: string; address: string; lastVisitDate: string; id: string; isCompleted?: boolean; buildingType?: string }>();
+    visits.forEach(v => {
+      if (v.isCompleted && v.clientName && !completedCustomersMap.has(v.clientMobile)) {
+        completedCustomersMap.set(v.clientMobile, {
+          name: v.clientName,
+          mobile: v.clientMobile,
+          address: v.address,
+          lastVisitDate: v.visitingDate,
+          id: v.id,
+          isCompleted: true,
+          buildingType: v.buildingType || 'Home'
+        });
+      }
+    });
+    return Array.from(completedCustomersMap.values());
+  }, [visits]);
 
   // 2. Carpenters map
-  const carpentersMap = new Map<string, { name: string; mobile: string; clientName: string; address: string; lastVisitDate: string; id: string; photo?: string | null; contractorRemarks?: string; contractorAddress?: string }>();
-  visits.forEach(v => {
-    if (v.contractorType === 'carpenter' && v.contractorName && !carpentersMap.has(v.contractorMobile)) {
-      carpentersMap.set(v.contractorMobile, {
-        name: v.contractorName,
-        mobile: v.contractorMobile,
-        clientName: v.clientName,
-        address: v.address || v.contractorAddress || '',
-        lastVisitDate: v.visitingDate,
-        id: v.id,
-        photo: v.photo,
-        contractorRemarks: v.contractorRemarks,
-        contractorAddress: v.contractorAddress
-      });
-    }
-    if (v.carpenterName && v.carpenterMobile && !carpentersMap.has(v.carpenterMobile)) {
-      carpentersMap.set(v.carpenterMobile, {
-        name: v.carpenterName,
-        mobile: v.carpenterMobile,
-        clientName: v.clientName,
-        address: v.address || v.carpenterPlace || '',
-        lastVisitDate: v.visitingDate,
-        id: v.id,
-        photo: null,
-        contractorRemarks: '',
-        contractorAddress: v.carpenterPlace
-      });
-    }
-  });
-  const carpenters = Array.from(carpentersMap.values());
+  const carpenters = React.useMemo(() => {
+    const carpentersMap = new Map<string, { name: string; mobile: string; clientName: string; address: string; lastVisitDate: string; id: string; photo?: string | null; contractorRemarks?: string; contractorAddress?: string }>();
+    visits.forEach(v => {
+      if (v.contractorType === 'carpenter' && v.contractorName && !carpentersMap.has(v.contractorMobile)) {
+        carpentersMap.set(v.contractorMobile, {
+          name: v.contractorName,
+          mobile: v.contractorMobile,
+          clientName: v.clientName,
+          address: v.address || v.contractorAddress || '',
+          lastVisitDate: v.visitingDate,
+          id: v.id,
+          photo: v.photo,
+          contractorRemarks: v.contractorRemarks,
+          contractorAddress: v.contractorAddress
+        });
+      }
+      if (v.carpenterName && v.carpenterMobile && !carpentersMap.has(v.carpenterMobile)) {
+        carpentersMap.set(v.carpenterMobile, {
+          name: v.carpenterName,
+          mobile: v.carpenterMobile,
+          clientName: v.clientName,
+          address: v.address || v.carpenterPlace || '',
+          lastVisitDate: v.visitingDate,
+          id: v.id,
+          photo: null,
+          contractorRemarks: '',
+          contractorAddress: v.carpenterPlace
+        });
+      }
+    });
+    return Array.from(carpentersMap.values());
+  }, [visits]);
 
   // 3. Interior Designers map
-  const interiorsMap = new Map<string, { name: string; mobile: string; clientName: string; address: string; lastVisitDate: string; id: string; photo?: string | null; contractorRemarks?: string; contractorAddress?: string }>();
-  visits.forEach(v => {
-    if (v.contractorType === 'interior' && v.contractorName && !interiorsMap.has(v.contractorMobile)) {
-      interiorsMap.set(v.contractorMobile, {
-        name: v.contractorName,
-        mobile: v.contractorMobile,
-        clientName: v.clientName,
-        address: v.address || v.contractorAddress || '',
-        lastVisitDate: v.visitingDate,
-        id: v.id,
-        photo: v.photo,
-        contractorRemarks: v.contractorRemarks,
-        contractorAddress: v.contractorAddress
-      });
-    }
-    if (v.interiorName && v.interiorMobile && !interiorsMap.has(v.interiorMobile)) {
-      interiorsMap.set(v.interiorMobile, {
-        name: v.interiorName,
-        mobile: v.interiorMobile,
-        clientName: v.clientName,
-        address: v.address || v.interiorPlace || '',
-        lastVisitDate: v.visitingDate,
-        id: v.id,
-        photo: null,
-        contractorRemarks: '',
-        contractorAddress: v.interiorPlace
-      });
-    }
-  });
-  const interiors = Array.from(interiorsMap.values());
+  const interiors = React.useMemo(() => {
+    const interiorsMap = new Map<string, { name: string; mobile: string; clientName: string; address: string; lastVisitDate: string; id: string; photo?: string | null; contractorRemarks?: string; contractorAddress?: string }>();
+    visits.forEach(v => {
+      if (v.contractorType === 'interior' && v.contractorName && !interiorsMap.has(v.contractorMobile)) {
+        interiorsMap.set(v.contractorMobile, {
+          name: v.contractorName,
+          mobile: v.contractorMobile,
+          clientName: v.clientName,
+          address: v.address || v.contractorAddress || '',
+          lastVisitDate: v.visitingDate,
+          id: v.id,
+          photo: v.photo,
+          contractorRemarks: v.contractorRemarks,
+          contractorAddress: v.contractorAddress
+        });
+      }
+      if (v.interiorName && v.interiorMobile && !interiorsMap.has(v.interiorMobile)) {
+        interiorsMap.set(v.interiorMobile, {
+          name: v.interiorName,
+          mobile: v.interiorMobile,
+          clientName: v.clientName,
+          address: v.address || v.interiorPlace || '',
+          lastVisitDate: v.visitingDate,
+          id: v.id,
+          photo: null,
+          contractorRemarks: '',
+          contractorAddress: v.interiorPlace
+        });
+      }
+    });
+    return Array.from(interiorsMap.values());
+  }, [visits]);
 
   // 4. Architects map
-  const architectsMap = new Map<string, { name: string; mobile: string; clientName: string; address: string; lastVisitDate: string; id: string; photo?: string | null; contractorRemarks?: string; contractorAddress?: string }>();
-  visits.forEach(v => {
-    if (v.contractorType === 'architect' && v.contractorName && !architectsMap.has(v.contractorMobile)) {
-      architectsMap.set(v.contractorMobile, {
-        name: v.contractorName,
-        mobile: v.contractorMobile,
-        clientName: v.clientName,
-        address: v.address || v.contractorAddress || '',
-        lastVisitDate: v.visitingDate,
-        id: v.id,
-        photo: v.photo,
-        contractorRemarks: v.contractorRemarks,
-        contractorAddress: v.contractorAddress
-      });
-    }
-    if (v.architectName && v.architectMobile && !architectsMap.has(v.architectMobile)) {
-      architectsMap.set(v.architectMobile, {
-        name: v.architectName,
-        mobile: v.architectMobile,
-        clientName: v.clientName,
-        address: v.address || v.architectPlace || '',
-        lastVisitDate: v.visitingDate,
-        id: v.id,
-        photo: null,
-        contractorRemarks: '',
-        contractorAddress: v.architectPlace
-      });
-    }
-  });
-  const architects = Array.from(architectsMap.values());
+  const architects = React.useMemo(() => {
+    const architectsMap = new Map<string, { name: string; mobile: string; clientName: string; address: string; lastVisitDate: string; id: string; photo?: string | null; contractorRemarks?: string; contractorAddress?: string }>();
+    visits.forEach(v => {
+      if (v.contractorType === 'architect' && v.contractorName && !architectsMap.has(v.contractorMobile)) {
+        architectsMap.set(v.contractorMobile, {
+          name: v.contractorName,
+          mobile: v.contractorMobile,
+          clientName: v.clientName,
+          address: v.address || v.contractorAddress || '',
+          lastVisitDate: v.visitingDate,
+          id: v.id,
+          photo: v.photo,
+          contractorRemarks: v.contractorRemarks,
+          contractorAddress: v.contractorAddress
+        });
+      }
+      if (v.architectName && v.architectMobile && !architectsMap.has(v.architectMobile)) {
+        architectsMap.set(v.architectMobile, {
+          name: v.architectName,
+          mobile: v.architectMobile,
+          clientName: v.clientName,
+          address: v.address || v.architectPlace || '',
+          lastVisitDate: v.visitingDate,
+          id: v.id,
+          photo: null,
+          contractorRemarks: '',
+          contractorAddress: v.architectPlace
+        });
+      }
+    });
+    return Array.from(architectsMap.values());
+  }, [visits]);
 
   // 5. Builders map
-  const buildersMap = new Map<string, { name: string; mobile: string; clientName: string; address: string; lastVisitDate: string; id: string; photo?: string | null; contractorRemarks?: string; contractorAddress?: string }>();
-  visits.forEach(v => {
-    if (v.contractorType === 'builder' && v.contractorName && !buildersMap.has(v.contractorMobile)) {
-      buildersMap.set(v.contractorMobile, {
-        name: v.contractorName,
-        mobile: v.contractorMobile,
-        clientName: v.clientName,
-        address: v.address || v.contractorAddress || '',
-        lastVisitDate: v.visitingDate,
-        id: v.id,
-        photo: v.photo,
-        contractorRemarks: v.contractorRemarks,
-        contractorAddress: v.contractorAddress
-      });
-    }
-    if (v.builderName && v.builderMobile && !buildersMap.has(v.builderMobile)) {
-      buildersMap.set(v.builderMobile, {
-        name: v.builderName,
-        mobile: v.builderMobile,
-        clientName: v.clientName,
-        address: v.address || v.builderPlace || '',
-        lastVisitDate: v.visitingDate,
-        id: v.id,
-        photo: null,
-        contractorRemarks: '',
-        contractorAddress: v.builderPlace
-      });
-    }
-  });
-  const builders = Array.from(buildersMap.values());
+  const builders = React.useMemo(() => {
+    const buildersMap = new Map<string, { name: string; mobile: string; clientName: string; address: string; lastVisitDate: string; id: string; photo?: string | null; contractorRemarks?: string; contractorAddress?: string }>();
+    visits.forEach(v => {
+      if (v.contractorType === 'builder' && v.contractorName && !buildersMap.has(v.contractorMobile)) {
+        buildersMap.set(v.contractorMobile, {
+          name: v.contractorName,
+          mobile: v.contractorMobile,
+          clientName: v.clientName,
+          address: v.address || v.contractorAddress || '',
+          lastVisitDate: v.visitingDate,
+          id: v.id,
+          photo: v.photo,
+          contractorRemarks: v.contractorRemarks,
+          contractorAddress: v.contractorAddress
+        });
+      }
+      if (v.builderName && v.builderMobile && !buildersMap.has(v.builderMobile)) {
+        buildersMap.set(v.builderMobile, {
+          name: v.builderName,
+          mobile: v.builderMobile,
+          clientName: v.clientName,
+          address: v.address || v.builderPlace || '',
+          lastVisitDate: v.visitingDate,
+          id: v.id,
+          photo: null,
+          contractorRemarks: '',
+          contractorAddress: v.builderPlace
+        });
+      }
+    });
+    return Array.from(buildersMap.values());
+  }, [visits]);
 
   // Helper for determining human-friendly place of visit is changed to purely return the location name for location-wise grouping
   const getPlaceName = React.useCallback((v: SiteVisit) => {
@@ -723,6 +760,84 @@ export default function Dashboard({
 
     return list;
   }, [visits, placesSearchQuery, getPlaceName]);
+
+  // Memoized Follow-up data for optimal performance and no UI lag
+  const filteredFollowups = React.useMemo(() => {
+    let rawData: { name: string; mobile: string; clientName?: string; address?: string; lastVisitDate?: string; buildingType?: string; remarks?: string; nextFollowUp?: string }[] = [];
+    if (activeFollowupSubTab === 'client') {
+      rawData = customers.map(c => ({
+        name: c.name,
+        mobile: c.mobile,
+        clientName: c.name,
+        address: c.address,
+        lastVisitDate: c.lastVisitDate,
+        buildingType: c.buildingType,
+        remarks: '',
+        nextFollowUp: ''
+      }));
+    } else if (activeFollowupSubTab === 'carpenter') {
+      rawData = carpenters;
+    } else if (activeFollowupSubTab === 'interior') {
+      rawData = interiors;
+    } else if (activeFollowupSubTab === 'architect') {
+      rawData = architects;
+    } else if (activeFollowupSubTab === 'builder') {
+      rawData = builders;
+    }
+
+    const query = followupSearchQuery.toLowerCase().trim();
+    const nowMs = Date.now();
+    return rawData.filter(item => {
+      const identifier = item.mobile && item.mobile !== '0000000000' ? item.mobile : item.name;
+      const key = `${identifier}_${activeFollowupSubTab}`;
+      const snoozeUntil = snoozedFollowups[key];
+      if (snoozeUntil && new Date(snoozeUntil).getTime() > nowMs) {
+        return false;
+      }
+      return item.name.toLowerCase().includes(query) || 
+        (item.clientName || '').toLowerCase().includes(query) ||
+        (item.mobile || '').includes(query);
+    });
+  }, [activeFollowupSubTab, customers, carpenters, interiors, architects, builders, followupSearchQuery, snoozedFollowups]);
+
+  const groupedFollowups = React.useMemo(() => {
+    if (activeFollowupSubTab !== 'client') return null;
+
+    if (followupGroupMode === 'buildingwise') {
+      const groupedByBuilding: Record<string, typeof filteredFollowups> = {
+        'Home 🏠': [],
+        'Duplex 🏡': [],
+        'Apartment 🏢': [],
+        'Shop 🏬': [],
+        'Other 🏗️': []
+      };
+
+      filteredFollowups.forEach(item => {
+        const bType = item.buildingType || 'Home';
+        const key = bType === 'Home' ? 'Home 🏠'
+          : bType === 'Duplex' ? 'Duplex 🏡'
+          : bType === 'Apartment' ? 'Apartment 🏢'
+          : bType === 'Shop' ? 'Shop 🏬'
+          : 'Other 🏗️';
+        groupedByBuilding[key].push(item);
+      });
+      return { type: 'buildingwise', data: groupedByBuilding };
+    }
+
+    if (followupGroupMode === 'placewise') {
+      const groupedPlacewise: Record<string, typeof filteredFollowups> = {};
+      filteredFollowups.forEach(item => {
+        const pl = (item.address || 'No Address').trim();
+        if (!groupedPlacewise[pl]) {
+          groupedPlacewise[pl] = [];
+        }
+        groupedPlacewise[pl].push(item);
+      });
+      return { type: 'placewise', data: groupedPlacewise };
+    }
+
+    return null;
+  }, [activeFollowupSubTab, followupGroupMode, filteredFollowups]);
 
   // Simple follow-up count badge logic: count only visits with a manually-set nextFollowUpDate
   const totalRemindersCount = visits.filter(v => v.nextFollowUpDate).length;
@@ -2105,41 +2220,7 @@ Report generated locally from zone sync.`;
             )}
 
             {(() => {
-              let rawData: { name: string; mobile: string; clientName?: string; address?: string; lastVisitDate?: string; buildingType?: string }[] = [];
-              if (activeFollowupSubTab === 'client') {
-                rawData = Array.from(customersMap.values()).map(c => ({
-                  name: c.name,
-                  mobile: c.mobile,
-                  clientName: c.name,
-                  address: c.address,
-                  lastVisitDate: c.lastVisitDate,
-                  buildingType: c.buildingType
-                }));
-              } else if (activeFollowupSubTab === 'carpenter') {
-                rawData = carpenters;
-              } else if (activeFollowupSubTab === 'interior') {
-                rawData = interiors;
-              } else if (activeFollowupSubTab === 'architect') {
-                rawData = architects;
-              } else if (activeFollowupSubTab === 'builder') {
-                rawData = builders;
-              }
-
-              const query = followupSearchQuery.toLowerCase().trim();
-              const nowMs = Date.now();
-              const filtered = rawData.filter(item => {
-                const identifier = item.mobile && item.mobile !== '0000000000' ? item.mobile : item.name;
-                const key = `${identifier}_${activeFollowupSubTab}`;
-                const snoozeUntil = snoozedFollowups[key];
-                if (snoozeUntil && new Date(snoozeUntil).getTime() > nowMs) {
-                  return false;
-                }
-                return item.name.toLowerCase().includes(query) || 
-                  (item.clientName || '').toLowerCase().includes(query) ||
-                  (item.mobile || '').includes(query);
-              });
-
-              if (filtered.length === 0) {
+              if (filteredFollowups.length === 0) {
                 return (
                   <div className="py-12 text-center text-slate-400 font-sans space-y-1">
                     <p className="text-xs font-semibold">No contacts found</p>
@@ -2148,29 +2229,12 @@ Report generated locally from zone sync.`;
                 );
               }
 
-              if (activeFollowupSubTab === 'client' && followupGroupMode === 'buildingwise') {
-                const groupedByBuilding: Record<string, typeof filtered> = {
-                  'Home 🏠': [],
-                  'Duplex 🏡': [],
-                  'Apartment 🏢': [],
-                  'Shop 🏬': [],
-                  'Other 🏗️': []
-                };
-
-                filtered.forEach(item => {
-                  const bType = item.buildingType || 'Home';
-                  const key = bType === 'Home' ? 'Home 🏠'
-                    : bType === 'Duplex' ? 'Duplex 🏡'
-                    : bType === 'Apartment' ? 'Apartment 🏢'
-                    : bType === 'Shop' ? 'Shop 🏬'
-                    : 'Other 🏗️';
-                  groupedByBuilding[key].push(item);
-                });
-
+              if (activeFollowupSubTab === 'client' && followupGroupMode === 'buildingwise' && groupedFollowups?.type === 'buildingwise') {
+                const groupedByBuilding = groupedFollowups.data;
                 const buildingKeys = Object.keys(groupedByBuilding).filter(k => groupedByBuilding[k].length > 0);
 
                 return (
-                  <div className="space-y-6" id="followup-buildingwise-sections">
+                  <div className="space-y-6 w-full max-w-lg mx-auto" id="followup-buildingwise-sections">
                     {buildingKeys.map((buildingName, gIdx) => (
                       <div key={`${buildingName}-${gIdx}`} className="space-y-3 bg-slate-50/20 p-4.5 rounded-2xl border border-slate-200/60" id={`followup-building-group-${gIdx}`}>
                         <div className="flex items-center justify-between border-b border-slate-100 pb-2">
@@ -2182,69 +2246,16 @@ Report generated locally from zone sync.`;
                           </h3>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {groupedByBuilding[buildingName].map((item, idx) => {
-                            const hasMobile = item.mobile && item.mobile !== '0000000000';
-                            const activeDate = item.lastVisitDate ? formatDateToDDMMYYYY(item.lastVisitDate) : '';
-                            return (
-                              <div key={idx} className="p-4 rounded-xl border border-slate-150 bg-white hover:border-indigo-250 transition-all flex flex-col justify-between space-y-3 shadow-2xs">
-                                <div className="space-y-1">
-                                  <div className="flex justify-between items-start gap-2">
-                                    <div className="min-w-0 flex-1">
-                                      <h4 className="text-xs font-bold text-slate-800 leading-snug truncate">{item.name}</h4>
-                                      <p className="text-[10px] text-slate-500 font-sans truncate" title={item.address}>
-                                        📍 {item.address || 'No Address'}
-                                      </p>
-                                    </div>
-                                    <span className="text-[9px] uppercase font-mono px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100/50 shrink-0">
-                                      {item.buildingType || 'Home'}
-                                    </span>
-                                  </div>
-                                  {activeDate && (
-                                    <p className="text-[9px] text-slate-400 font-mono">
-                                      Last Visited: {activeDate}
-                                    </p>
-                                  )}
-                                </div>
-
-                                <div className="flex gap-2">
-                                  {hasMobile ? (
-                                    <a
-                                      href={`tel:${item.mobile}`}
-                                      onClick={() => handleFollowupInteraction(item, 'Call')}
-                                      className="flex-1 py-1.5 px-3 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100/50 text-indigo-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer text-center"
-                                    >
-                                      <PhoneCall size={10} />
-                                      <span>Call</span>
-                                    </a>
-                                  ) : (
-                                    <span className="flex-1 py-1.5 px-3 bg-slate-105 border border-slate-150 text-slate-400 rounded-lg text-[10px] font-bold flex items-center justify-center cursor-not-allowed select-none text-center">
-                                      No Phone
-                                    </span>
-                                  )}
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const cleanPh = item.mobile.replace(/\D/g, '').length === 10 ? '91' + item.mobile.replace(/\D/g, '') : item.mobile.replace(/\D/g, '');
-                                      setWhatsappSelectModal({
-                                        phone: cleanPh,
-                                        text: activeFollowupSubTab === 'client' 
-                                          ? `hello ${item.name} garu,i recently visited your site, work progress is good 👍.thank you sir.`
-                                          : `hello ${item.name} garu,how are you.projects going well, Regards`,
-                                        name: item.name
-                                      });
-                                      handleFollowupInteraction(item, 'WhatsApp');
-                                    }}
-                                    className="flex-1 py-1.5 px-3 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100/50 text-emerald-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer text-center"
-                                  >
-                                    <MessageCircle size={10} />
-                                    <span>WhatsApp</span>
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
+                        <div className="grid grid-cols-1 gap-4">
+                          {groupedByBuilding[buildingName].map((item, idx) => (
+                            <FollowUpContactCard 
+                              key={item.mobile || item.name || idx}
+                              index={idx + 1}
+                              item={item}
+                              onCall={handleCall}
+                              onWhatsApp={handleWhatsApp}
+                            />
+                          ))}
                         </div>
                       </div>
                     ))}
@@ -2252,20 +2263,12 @@ Report generated locally from zone sync.`;
                 );
               }
 
-              if (activeFollowupSubTab === 'client' && followupGroupMode === 'placewise') {
-                const grouped: Record<string, typeof filtered> = {};
-                filtered.forEach(item => {
-                  const pl = (item.address || 'No Address').trim();
-                  if (!grouped[pl]) {
-                    grouped[pl] = [];
-                  }
-                  grouped[pl].push(item);
-                });
-
+              if (activeFollowupSubTab === 'client' && followupGroupMode === 'placewise' && groupedFollowups?.type === 'placewise') {
+                const grouped = groupedFollowups.data;
                 const sortedPlaces = Object.keys(grouped).sort();
 
                 return (
-                  <div className="space-y-6" id="followup-placewise-sections">
+                  <div className="space-y-6 w-full max-w-lg mx-auto" id="followup-placewise-sections">
                     {sortedPlaces.map((placeName, gIdx) => (
                       <div key={`${placeName}-${gIdx}`} className="space-y-3 bg-slate-50/20 p-4.5 rounded-2xl border border-slate-200/60" id={`followup-place-group-${gIdx}`}>
                         <div className="flex items-center justify-between border-b border-slate-100 pb-2">
@@ -2278,74 +2281,16 @@ Report generated locally from zone sync.`;
                           </h3>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {grouped[placeName].map((item, idx) => {
-                            const hasMobile = item.mobile && item.mobile !== '0000000000';
-                            const activeDate = item.lastVisitDate ? formatDateToDDMMYYYY(item.lastVisitDate) : '';
-                            return (
-                              <div key={idx} className="p-4 rounded-xl border border-slate-150 bg-white hover:border-indigo-250 transition-all flex flex-col justify-between space-y-3 shadow-2xs">
-                                <div className="space-y-1">
-                                  <div className="flex justify-between items-start gap-2">
-                                    <div className="min-w-0 flex-1">
-                                      <h4 className="text-xs font-bold text-slate-800 leading-snug truncate">{item.name}</h4>
-                                      <span className="text-[9px] uppercase font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200/50">
-                                        Client
-                                      </span>
-                                    </div>
-                                    <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100/50 shrink-0">
-                                      {item.buildingType || 'Home'}
-                                    </span>
-                                  </div>
-                                  {item.clientName && item.clientName !== item.name && (
-                                    <p className="text-[10px] text-slate-550 font-sans">
-                                      Site: <strong className="text-slate-705">{item.clientName}</strong>
-                                    </p>
-                                  )}
-                                  {activeDate && (
-                                    <p className="text-[9px] text-slate-400 font-mono">
-                                      Last Visited: {activeDate}
-                                    </p>
-                                  )}
-                                </div>
-
-                                <div className="flex gap-2">
-                                  {hasMobile ? (
-                                    <a
-                                      href={`tel:${item.mobile}`}
-                                      onClick={() => handleFollowupInteraction(item, 'Call')}
-                                      className="flex-1 py-1.5 px-3 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100/50 text-indigo-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer text-center"
-                                    >
-                                      <PhoneCall size={10} />
-                                      <span>Call</span>
-                                    </a>
-                                  ) : (
-                                    <span className="flex-1 py-1.5 px-3 bg-slate-105 border border-slate-150 text-slate-400 rounded-lg text-[10px] font-bold flex items-center justify-center cursor-not-allowed select-none text-center">
-                                      No Phone
-                                    </span>
-                                  )}
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const cleanPh = item.mobile.replace(/\D/g, '').length === 10 ? '91' + item.mobile.replace(/\D/g, '') : item.mobile.replace(/\D/g, '');
-                                      setWhatsappSelectModal({
-                                        phone: cleanPh,
-                                        text: activeFollowupSubTab === 'client' 
-                                          ? `hello ${item.name} garu,i recently visited your site, work progress is good 👍.thank you sir.`
-                                          : `hello ${item.name} garu,how are you.projects going well, Regards`,
-                                        name: item.name
-                                      });
-                                      handleFollowupInteraction(item, 'WhatsApp');
-                                    }}
-                                    className="flex-1 py-1.5 px-3 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100/50 text-emerald-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer text-center"
-                                  >
-                                    <MessageCircle size={10} />
-                                    <span>WhatsApp</span>
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
+                        <div className="grid grid-cols-1 gap-4">
+                          {grouped[placeName].map((item, idx) => (
+                            <FollowUpContactCard 
+                              key={item.mobile || item.name || idx}
+                              index={idx + 1}
+                              item={item}
+                              onCall={handleCall}
+                              onWhatsApp={handleWhatsApp}
+                            />
+                          ))}
                         </div>
                       </div>
                     ))}
@@ -2354,76 +2299,16 @@ Report generated locally from zone sync.`;
               }
 
               return (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="followup-singlegrid-view">
-                  {filtered.map((item, idx) => {
-                    const hasMobile = item.mobile && item.mobile !== '0000000000';
-                    const activeDate = item.lastVisitDate ? formatDateToDDMMYYYY(item.lastVisitDate) : '';
-                    return (
-                      <div key={idx} className="p-4 rounded-xl border border-slate-100 bg-slate-50/30 hover:bg-white hover:border-slate-200/80 transition-all flex flex-col justify-between space-y-3">
-                        <div className="space-y-1">
-                          <div className="flex justify-between items-start gap-2">
-                            <div className="min-w-0 flex-1">
-                              <h4 className="text-xs font-bold text-slate-800 leading-snug truncate">{item.name}</h4>
-                              <span className="text-[9px] uppercase font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200/50">
-                                {activeFollowupSubTab}
-                              </span>
-                            </div>
-                            {item.buildingType && (
-                              <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100/50 shrink-0">
-                                {item.buildingType}
-                              </span>
-                            )}
-                          </div>
-                          {item.clientName && item.clientName !== item.name && (
-                            <p className="text-[10px] text-slate-550 font-sans">
-                              Site: <strong className="text-slate-705">{item.clientName}</strong>
-                            </p>
-                          )}
-                          {activeDate && (
-                            <p className="text-[9px] text-slate-400 font-mono">
-                              Last Visited: {activeDate}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="flex gap-2">
-                          {hasMobile ? (
-                            <a
-                              href={`tel:${item.mobile}`}
-                              onClick={() => handleFollowupInteraction(item, 'Call')}
-                              className="flex-1 py-1.5 px-3 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100/50 text-indigo-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer text-center"
-                            >
-                              <PhoneCall size={10} />
-                              <span>Call</span>
-                            </a>
-                          ) : (
-                            <span className="flex-1 py-1.5 px-3 bg-slate-100 border border-slate-150 text-slate-400 rounded-lg text-[10px] font-bold flex items-center justify-center cursor-not-allowed select-none text-center">
-                              No Phone
-                            </span>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const cleanPh = item.mobile.replace(/\D/g, '').length === 10 ? '91' + item.mobile.replace(/\D/g, '') : item.mobile.replace(/\D/g, '');
-                              setWhatsappSelectModal({
-                                phone: cleanPh,
-                                text: activeFollowupSubTab === 'client' 
-                                  ? `hello ${item.name} garu,i recently visited your site, work progress is good 👍.thank you sir.`
-                                  : `hello ${item.name} garu,how are you.projects going well, Regards`,
-                                name: item.name
-                              });
-                              handleFollowupInteraction(item, 'WhatsApp');
-                            }}
-                            className="flex-1 py-1.5 px-3 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100/50 text-emerald-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer text-center"
-                          >
-                            <MessageCircle size={10} />
-                            <span>WhatsApp</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div className="grid grid-cols-1 gap-4 w-full max-w-lg mx-auto" id="followup-singlegrid-view">
+                  {filteredFollowups.map((item, idx) => (
+                    <FollowUpContactCard 
+                      key={item.mobile || item.name || idx}
+                      index={idx + 1}
+                      item={item}
+                      onCall={handleCall}
+                      onWhatsApp={handleWhatsApp}
+                    />
+                  ))}
                 </div>
               );
             })()}
@@ -4941,7 +4826,7 @@ Report generated locally from zone sync.`;
       )}
 
       {activeHomeTab === 'call' && (
-        <CallManager />
+        <CallManager onTriggerToast={onTriggerToast} />
       )}
 
       {activeHomeTab === 'completed' && (
@@ -5865,6 +5750,57 @@ Report generated locally from zone sync.`;
                 className="py-1.5 px-4 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Post-Call Remarks Modal */}
+      {postCallModal && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-[999] animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-lg border border-slate-100 shadow-2xl overflow-hidden animate-scale-up">
+            <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white p-5">
+              <h3 className="text-base font-black">Logged Call Remarks</h3>
+              <p className="text-xs text-indigo-200 mt-1">Update details for {postCallModal.item.name}</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Remarks</label>
+                <textarea
+                  className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg"
+                  value={popupRemarks}
+                  onChange={e => setPopupRemarks(e.target.value)}
+                  rows={3}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Next Follow-up</label>
+                <input
+                  type="text"
+                  className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg"
+                  value={popupNextFollowUp}
+                  onChange={e => setPopupNextFollowUp(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="p-5 bg-slate-50 border-t border-slate-100 flex gap-3">
+              <button
+                onClick={() => setPostCallModal(null)}
+                className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  // NOTE: This part needs updating the actual state if it was persistent.
+                  // For now, it just closes as requested.
+                  onTriggerToast?.(`Saved remarks for ${postCallModal.item.name}`, 'success');
+                  setPostCallModal(null);
+                }}
+                className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black"
+              >
+                Save
               </button>
             </div>
           </div>

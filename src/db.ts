@@ -520,8 +520,16 @@ export async function getAllVisits(userMobile?: string): Promise<SiteVisit[]> {
     cloudVisits.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     // Update local DB for fast loading & offline capabilities
+    const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
     for (const v of cloudVisits) {
-      await saveLocalVisit({ ...v, synced: true });
+      const createdTime = new Date(v.createdAt).getTime();
+      // Only cache visits that are newer than 90 days to optimize local storage
+      if (createdTime >= ninetyDaysAgo) {
+        await saveLocalVisit({ ...v, synced: true });
+      } else {
+        // Safe cleanup: delete from local DB if it was previously cached, keeping remote intact
+        await deleteLocalVisit(v.id);
+      }
     }
 
     return cloudVisits;
@@ -532,6 +540,44 @@ export async function getAllVisits(userMobile?: string): Promise<SiteVisit[]> {
       console.warn("Failed to fetch visits from Firestore. Falling back to local IndexedDB.", error);
       return await getLocalVisits(userMobile);
     }
+  }
+}
+
+export async function clearOlderSyncedVisits(userMobile?: string): Promise<number> {
+  try {
+    const dbInstance = await openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = dbInstance.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const visits = request.result as SiteVisit[];
+        let deleteCount = 0;
+        const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
+
+        for (const v of visits) {
+          if (userMobile && !isMobileMatch(v.userMobile, userMobile)) {
+            continue;
+          }
+          if (v.synced === true) {
+            const createdTime = new Date(v.createdAt).getTime();
+            if (createdTime < ninetyDaysAgo) {
+              store.delete(v.id);
+              deleteCount++;
+            }
+          }
+        }
+        resolve(deleteCount);
+      };
+
+      request.onerror = () => {
+        reject(request.error);
+      };
+    });
+  } catch (error) {
+    console.error('Failed to clear older synced visits from IndexedDB', error);
+    return 0;
   }
 }
 

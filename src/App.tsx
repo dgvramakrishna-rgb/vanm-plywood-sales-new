@@ -15,7 +15,8 @@ import {
   saveDealerToFirestore,
   deleteDealerFromFirestore,
   sanitizeDocId,
-  isMobileMatch
+  isMobileMatch,
+  clearOlderSyncedVisits
 } from './db';
 import { SiteVisit, Dealer } from './types';
 import { useBackgroundSync } from './syncService';
@@ -128,7 +129,7 @@ export default function App() {
   }, [visits]);
 
   // Instantiate the background synchronization hook
-  const { isOnline, isSyncing, unsyncedCount, triggerSync } = useBackgroundSync(async () => {
+  const { isOnline, isSyncing, unsyncedCount, syncProgress, triggerSync } = useBackgroundSync(async () => {
     await reloadVisits();
     triggerToast('Background Sync completed! All offline records pushed to Firestore.', 'success');
   });
@@ -240,6 +241,24 @@ export default function App() {
     } catch (err) {
       console.error('Backup failed:', err);
       triggerToast('Failed to generate backup file.', 'info');
+    }
+  };
+
+  const handleClearCache = async () => {
+    if (!currentUser) return;
+    try {
+      const clearedCount = await clearOlderSyncedVisits(currentUser.mobile);
+      if (clearedCount > 0) {
+        // Reload local cached visits
+        const cached = await getLocalVisits(currentUser.mobile);
+        setVisits(cached || []);
+        triggerToast(`🧹 Cache cleared! Removed ${clearedCount} synced visits older than 90 days from local storage.`, 'success');
+      } else {
+        triggerToast('✨ Local cache is already fully optimized!', 'success');
+      }
+    } catch (err) {
+      console.error('Failed to clear cache:', err);
+      triggerToast('Failed to optimize local cache storage.', 'info');
     }
   };
 
@@ -575,60 +594,83 @@ export default function App() {
             {/* Right side: Sync Connection widget & Profile Icon */}
             <div className="flex items-center gap-4 relative">
               {/* Sync and Connection Status Widget */}
-              <div className="flex items-center gap-2" id="sync-connection-widget">
-                {/* PWA Install Button when installable */}
-                {deferredPrompt && (
-                  <button
-                    onClick={installApp}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm border border-emerald-500 transition cursor-pointer animate-pulse"
-                    title="Install reference tracker onto your device screen for full offline-first functionality!"
-                    id="pwa-install-button"
-                  >
-                    <Download size={12} />
-                    <span>Install App</span>
-                  </button>
-                )}
+              <div className="flex flex-col gap-1.5" id="sync-connection-widget">
+                <div className="flex items-center gap-2">
+                  {/* PWA Install Button when installable */}
+                  {deferredPrompt && (
+                    <button
+                      onClick={installApp}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm border border-emerald-500 transition cursor-pointer animate-pulse"
+                      title="Install reference tracker onto your device screen for full offline-first functionality!"
+                      id="pwa-install-button"
+                    >
+                      <Download size={12} />
+                      <span>Install App</span>
+                    </button>
+                  )}
 
-                {/* Online/Offline Status Badge */}
-                <div
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border transition ${
-                    isOnline 
-                      ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300' 
-                      : 'bg-amber-500/10 border-amber-500/25 text-amber-300 font-bold'
-                  }`}
-                  title={isOnline ? 'Internet connection active' : 'Offline Mode active'}
-                  id="network-status-badge"
-                >
-                  <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`}></div>
-                  <span className="hidden sm:inline">{isOnline ? 'Online' : 'Offline'}</span>
+                  {/* Online/Offline Status Badge */}
+                  <div
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border transition ${
+                      isOnline 
+                        ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300' 
+                        : 'bg-amber-500/10 border-amber-500/25 text-amber-300 font-bold'
+                    }`}
+                    title={isOnline ? 'Internet connection active' : 'Offline Mode active'}
+                    id="network-status-badge"
+                  >
+                    <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`}></div>
+                    <span className="hidden sm:inline">{isOnline ? 'Online' : 'Offline'}</span>
+                  </div>
+
+                  {/* Sync Actions Badge */}
+                  {unsyncedCount > 0 ? (
+                    <button
+                      onClick={() => triggerSync()}
+                      disabled={isSyncing || !isOnline}
+                      className={`flex flex-col items-stretch justify-center px-2.5 py-1.5 rounded-xl text-[11px] font-extrabold border transition relative overflow-hidden ${
+                        isSyncing 
+                          ? 'bg-indigo-900/40 border-indigo-500/40 text-indigo-200 cursor-not-allowed'
+                          : isOnline 
+                            ? 'bg-amber-500/25 border-amber-500/40 text-amber-200 hover:bg-amber-500/35 cursor-pointer hover:border-amber-400'
+                            : 'bg-slate-500/20 border-slate-500/30 text-slate-300 cursor-not-allowed'
+                      }`}
+                      title={isSyncing ? `Syncing in progress: ${syncProgress}%` : `${unsyncedCount} unsynced visit record(s). Click to manually sync.`}
+                      id="manual-sync-trigger"
+                    >
+                      <div className="flex items-center gap-1.5 relative z-10 w-full justify-center">
+                        <RefreshCw size={12} className={`${isSyncing ? 'animate-spin' : ''}`} />
+                        <span>{isSyncing ? `Syncing ${syncProgress}%` : `${unsyncedCount} Unsynced`}</span>
+                      </div>
+                      {isSyncing && (
+                        <>
+                          <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-indigo-950/40 z-0" />
+                          <div 
+                            className="absolute bottom-0 left-0 h-[3px] bg-indigo-400 transition-all duration-300 z-0" 
+                            style={{ width: `${syncProgress}%` }}
+                          />
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    <div 
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border bg-indigo-500/10 border-indigo-500/20 text-indigo-300 select-none"
+                      title="All local records synced to Cloud Firestore."
+                      id="all-synced-badge"
+                    >
+                      <CheckCircle2 size={12} className="text-indigo-300" />
+                      <span className="hidden sm:inline">Synced</span>
+                    </div>
+                  )}
                 </div>
 
-                {/* Sync Actions Badge */}
-                {unsyncedCount > 0 ? (
-                  <button
-                    onClick={() => triggerSync()}
-                    disabled={isSyncing || !isOnline}
-                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-extrabold border transition ${
-                      isSyncing 
-                        ? 'bg-indigo-500/30 border-indigo-400/30 text-indigo-200 cursor-not-allowed'
-                        : isOnline 
-                          ? 'bg-amber-500/25 border-amber-500/40 text-amber-200 hover:bg-amber-500/35 cursor-pointer hover:border-amber-400'
-                          : 'bg-slate-500/20 border-slate-500/30 text-slate-300 cursor-not-allowed'
-                    }`}
-                    title={`${unsyncedCount} unsynced visit record(s). Click to manually sync.`}
-                    id="manual-sync-trigger"
-                  >
-                    <RefreshCw size={12} className={`${isSyncing ? 'animate-spin' : ''}`} />
-                    <span>{unsyncedCount} Unsynced</span>
-                  </button>
-                ) : (
-                  <div 
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border bg-indigo-500/10 border-indigo-500/20 text-indigo-300 select-none"
-                    title="All local records synced to Cloud Firestore."
-                    id="all-synced-badge"
-                  >
-                    <CheckCircle2 size={12} className="text-indigo-300" />
-                    <span className="hidden sm:inline">Synced</span>
+                {/* Smooth Mini Linear Progress Bar Under the Entire Widget for prominence */}
+                {isSyncing && (
+                  <div className="w-full bg-slate-800/60 rounded-full h-1 overflow-hidden" id="sync-global-progress">
+                    <div 
+                      className="bg-indigo-400 h-full rounded-full transition-all duration-300 ease-out" 
+                      style={{ width: `${syncProgress}%` }}
+                    />
                   </div>
                 )}
               </div>
@@ -796,6 +838,27 @@ export default function App() {
                             </div>
                           </div>
                           <span className="text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity text-[10px]">➔</span>
+                        </button>
+                      </div>
+
+                      {/* Clear Cache Action */}
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={handleClearCache}
+                          className="w-full flex items-center justify-between px-3 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 border border-rose-100 dark:border-rose-950/30 rounded-xl transition cursor-pointer group"
+                          title="Safely remove local synced visit records over 90 days old"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="p-1.5 bg-white dark:bg-slate-900 rounded-lg shadow-sm text-rose-600 dark:text-rose-400">
+                              <Trash2 size={14} />
+                            </div>
+                            <div className="text-left">
+                              <span className="block text-xs font-bold text-rose-800 dark:text-rose-200">Clear Cache</span>
+                              <span className="block text-[9px] text-slate-500 font-medium leading-none mt-0.5">Purge synced visits &gt; 90 days</span>
+                            </div>
+                          </div>
+                          <span className="text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity text-[10px]">➔</span>
                         </button>
                       </div>
 

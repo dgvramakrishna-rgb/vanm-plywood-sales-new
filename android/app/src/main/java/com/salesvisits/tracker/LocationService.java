@@ -1,5 +1,6 @@
 package com.salesvisits.tracker;
 
+import android.app.AlarmManager;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -16,6 +17,7 @@ import android.media.ToneGenerator;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.os.SystemClock;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import java.util.HashMap;
@@ -30,7 +32,7 @@ public class LocationService extends Service implements LocationListener {
     private static final int FOREGROUND_ID = 1001;
 
     private LocationManager locationManager;
-    private final Map<String, Long> lastAlertTimes = new HashMap<>();
+    private static final Map<String, Long> lastAlertTimes = new HashMap<>();
 
     @Override
     public void onCreate() {
@@ -227,6 +229,35 @@ public class LocationService extends Service implements LocationListener {
         if (locationManager != null) {
             locationManager.removeUpdates(this);
         }
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        Intent restartServiceIntent = new Intent(getApplicationContext(), LocationServiceReceiver.class);
+        restartServiceIntent.setAction("com.salesvisits.tracker.RESTART_SENSOR_SERVICE");
+        PendingIntent restartServicePendingIntent = PendingIntent.getBroadcast(
+                getApplicationContext(),
+                1,
+                restartServiceIntent,
+                PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE
+        );
+        AlarmManager alarmService = (AlarmManager) getApplicationContext().getSystemService(Context.ALARM_SERVICE);
+        if (alarmService != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmService.setExactAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        SystemClock.elapsedRealtime() + 1000,
+                        restartServicePendingIntent
+                );
+            } else {
+                alarmService.set(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        SystemClock.elapsedRealtime() + 1000,
+                        restartServicePendingIntent
+                );
+            }
+        }
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override
