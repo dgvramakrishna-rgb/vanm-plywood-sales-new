@@ -520,16 +520,8 @@ export async function getAllVisits(userMobile?: string): Promise<SiteVisit[]> {
     cloudVisits.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     // Update local DB for fast loading & offline capabilities
-    const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
     for (const v of cloudVisits) {
-      const createdTime = new Date(v.createdAt).getTime();
-      // Only cache visits that are newer than 90 days to optimize local storage
-      if (createdTime >= ninetyDaysAgo) {
-        await saveLocalVisit({ ...v, synced: true });
-      } else {
-        // Safe cleanup: delete from local DB if it was previously cached, keeping remote intact
-        await deleteLocalVisit(v.id);
-      }
+      await saveLocalVisit({ ...v, synced: true });
     }
 
     return cloudVisits;

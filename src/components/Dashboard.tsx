@@ -40,7 +40,8 @@ import {
   Info,
   CheckSquare,
   Map as MapIcon,
-  Layers
+  Layers,
+  Download
 } from 'lucide-react';
 import { SiteVisit, Dealer } from '../types';
 import { compressImage } from '../utils/imageCompressor';
@@ -53,6 +54,7 @@ import SiteVisitsOSMMap from './SiteVisitsOSMMap';
 import ContactsUploader, { ContactItem } from './ContactsUploader';
 import CallManager from './CallManager';
 import FollowUpContactCard from './FollowUpContactCard';
+import VirtualizedFollowupList from './VirtualizedFollowupList';
 import { 
   requestNotificationPermission, 
   getNotificationPermissionStatus, 
@@ -77,7 +79,7 @@ interface DashboardProps {
   onDeleteDealer?: (mobile: string) => void;
   onAddNewVisit: () => void;
   onQuickSave?: (visit: Omit<SiteVisit, 'id' | 'createdAt'> & { id?: string; createdAt?: string }) => void;
-  onToggleCompleteCustomer?: (mobile: string, isCompleted: boolean) => Promise<void>;
+  onToggleCompleteCustomer?: (mobile: string | string[], isCompleted: boolean) => Promise<void>;
   onDeleteCustomer?: (mobile: string) => Promise<void>;
   onDeleteCarpenter?: (mobile: string) => Promise<void>;
   onDeleteInterior?: (mobile: string) => Promise<void>;
@@ -839,6 +841,99 @@ export default function Dashboard({
     return null;
   }, [activeFollowupSubTab, followupGroupMode, filteredFollowups]);
 
+  // Handle downloading group-wise CSV report
+  const handleDownloadCSV = React.useCallback(() => {
+    let csvRows: string[][] = [];
+    const subTabLabel = activeFollowupSubTab === 'client' ? 'Client'
+      : activeFollowupSubTab === 'carpenter' ? 'Carpenter'
+      : activeFollowupSubTab === 'interior' ? 'Interior Designer'
+      : activeFollowupSubTab === 'architect' ? 'Architect'
+      : 'Builder';
+
+    if (activeFollowupSubTab === 'client') {
+      if (followupGroupMode === 'buildingwise' && groupedFollowups?.type === 'buildingwise') {
+        csvRows.push(['Building Group', 'Client Name', 'Mobile Number', 'Address / Place', 'Last Visit Date']);
+        const groupedData = groupedFollowups.data;
+        Object.keys(groupedData).forEach(groupName => {
+          if (groupedData[groupName].length > 0) {
+            groupedData[groupName].forEach(item => {
+              csvRows.push([
+                groupName,
+                item.name || '',
+                item.mobile || '',
+                item.address || '',
+                item.lastVisitDate || ''
+              ]);
+            });
+          }
+        });
+      } else if (followupGroupMode === 'placewise' && groupedFollowups?.type === 'placewise') {
+        csvRows.push(['Place Group', 'Client Name', 'Mobile Number', 'Address / Place', 'Last Visit Date', 'Building Type']);
+        const groupedData = groupedFollowups.data;
+        Object.keys(groupedData).sort().forEach(groupName => {
+          if (groupedData[groupName].length > 0) {
+            groupedData[groupName].forEach(item => {
+              csvRows.push([
+                groupName,
+                item.name || '',
+                item.mobile || '',
+                item.address || '',
+                item.lastVisitDate || '',
+                item.buildingType || ''
+              ]);
+            });
+          }
+        });
+      } else {
+        // Single Grid (Ungrouped)
+        csvRows.push(['Client Name', 'Mobile Number', 'Address / Place', 'Last Visit Date', 'Building Type']);
+        filteredFollowups.forEach(item => {
+          csvRows.push([
+            item.name || '',
+            item.mobile || '',
+            item.address || '',
+            item.lastVisitDate || '',
+            item.buildingType || ''
+          ]);
+        });
+      }
+    } else {
+      // Carpenters, Interiors, Architects, Builders
+      csvRows.push([`${subTabLabel} Name`, 'Mobile Number', 'Assigned Client', 'Address / Place', 'Last Visit Date']);
+      filteredFollowups.forEach(item => {
+        csvRows.push([
+          item.name || '',
+          item.mobile || '',
+          item.clientName || '',
+          item.address || '',
+          item.lastVisitDate || ''
+        ]);
+      });
+    }
+
+    // Convert rows to CSV string
+    const csvContent = csvRows
+      .map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    // Create safe download trigger
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    
+    // Generate clear human-friendly file name
+    const timestamp = new Date().toISOString().split('T')[0];
+    const groupNameStr = activeFollowupSubTab === 'client' ? `_${followupGroupMode}` : '';
+    link.href = url;
+    link.setAttribute('download', `FieldConnect_Followups_${subTabLabel}${groupNameStr}_${timestamp}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    onTriggerToast?.(`📊 Group-wise CSV report for ${subTabLabel} downloaded successfully!`, 'success');
+  }, [activeFollowupSubTab, followupGroupMode, filteredFollowups, groupedFollowups, onTriggerToast]);
+
   // Simple follow-up count badge logic: count only visits with a manually-set nextFollowUpDate
   const totalRemindersCount = visits.filter(v => v.nextFollowUpDate).length;
 
@@ -1173,8 +1268,8 @@ export default function Dashboard({
 
   const getCompiledDailyReportText = () => {
     const formattedDate = formatDateToDDMMYYYY(reportDateInput);
-    // Remove client absent sites from the day visits
-    const dayVisits = visits.filter(v => v.visitingDate === reportDateInput && v.customerNotAvailable !== true);
+    // Keep all client visits (including client absent sites) in the day visits
+    const dayVisits = visits.filter(v => v.visitingDate === reportDateInput);
     
     let text = `DAILY REPORT \n`;
     text += `DATE. ${formattedDate}\n\n`;
@@ -1189,7 +1284,6 @@ export default function Dashboard({
       const seenMobiles = new Set<string>();
       const list: SiteVisit[] = [];
       const sorted = [...allVisits]
-        .filter(v => v.customerNotAvailable !== true) // Client absent sites removed from fallback options too
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       
       for (const v of sorted) {
@@ -1848,7 +1942,7 @@ Report generated locally from zone sync.`;
             
             <div className="relative h-[650px] w-full">
               <SiteVisitsOSMMap 
-                visits={visits.filter(v => !v.isCompleted)} 
+                visits={visits} 
                 onEditVisit={onEditVisit}
                 onCompleteVisit={async (visit) => {
                   if (onToggleCompleteCustomer) {
@@ -2144,18 +2238,30 @@ Report generated locally from zone sync.`;
             )}
           </div>
 
-          {/* Search Bar */}
-          <div className="relative my-4">
-            <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-              <Search size={14} className="text-slate-400" />
-            </span>
-            <input
-              type="text"
-              placeholder="Search by name or client site..."
-              value={followupSearchQuery}
-              onChange={(e) => setFollowupSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white"
-            />
+          {/* Search Bar & Download CSV Option */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 my-4">
+            <div className="relative flex-1">
+              <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                <Search size={14} className="text-slate-400" />
+              </span>
+              <input
+                type="text"
+                placeholder="Search by name or client site..."
+                value={followupSearchQuery}
+                onChange={(e) => setFollowupSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleDownloadCSV}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs transition cursor-pointer shrink-0 border border-emerald-700/40"
+              title="Download Group-wise CSV Report"
+              id="btn-followup-download-csv"
+            >
+              <Download size={14} />
+              <span>Download CSV Report</span>
+            </button>
           </div>
 
           {/* List Display */}
@@ -2223,93 +2329,21 @@ Report generated locally from zone sync.`;
               if (filteredFollowups.length === 0) {
                 return (
                   <div className="py-12 text-center text-slate-400 font-sans space-y-1">
-                    <p className="text-xs font-semibold">No contacts found</p>
-                    <p className="text-[10px]">Try searching for something else or register a site visit first.</p>
-                  </div>
-                );
-              }
-
-              if (activeFollowupSubTab === 'client' && followupGroupMode === 'buildingwise' && groupedFollowups?.type === 'buildingwise') {
-                const groupedByBuilding = groupedFollowups.data;
-                const buildingKeys = Object.keys(groupedByBuilding).filter(k => groupedByBuilding[k].length > 0);
-
-                return (
-                  <div className="space-y-6 w-full max-w-lg mx-auto" id="followup-buildingwise-sections">
-                    {buildingKeys.map((buildingName, gIdx) => (
-                      <div key={`${buildingName}-${gIdx}`} className="space-y-3 bg-slate-50/20 p-4.5 rounded-2xl border border-slate-200/60" id={`followup-building-group-${gIdx}`}>
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                          <h3 className="text-sm font-black text-slate-900 font-sans tracking-tight flex items-center gap-1.5">
-                            <span>{buildingName}</span>
-                            <span className="text-[10px] bg-indigo-100/60 text-indigo-850 px-1.5 py-0.5 rounded font-mono font-bold">
-                              {groupedByBuilding[buildingName].length} {groupedByBuilding[buildingName].length === 1 ? 'Customer' : 'Customers'}
-                            </span>
-                          </h3>
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-4">
-                          {groupedByBuilding[buildingName].map((item, idx) => (
-                            <FollowUpContactCard 
-                              key={item.mobile || item.name || idx}
-                              index={idx + 1}
-                              item={item}
-                              onCall={handleCall}
-                              onWhatsApp={handleWhatsApp}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              }
-
-              if (activeFollowupSubTab === 'client' && followupGroupMode === 'placewise' && groupedFollowups?.type === 'placewise') {
-                const grouped = groupedFollowups.data;
-                const sortedPlaces = Object.keys(grouped).sort();
-
-                return (
-                  <div className="space-y-6 w-full max-w-lg mx-auto" id="followup-placewise-sections">
-                    {sortedPlaces.map((placeName, gIdx) => (
-                      <div key={`${placeName}-${gIdx}`} className="space-y-3 bg-slate-50/20 p-4.5 rounded-2xl border border-slate-200/60" id={`followup-place-group-${gIdx}`}>
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                          <h3 className="text-sm font-black text-slate-900 font-sans tracking-tight flex items-center gap-1.5">
-                            <span className="flex items-center justify-center w-5 h-5 rounded-md bg-indigo-50 text-indigo-600 text-[10px]">📍</span>
-                            <span>{placeName}</span>
-                            <span className="text-[10px] bg-indigo-100/60 text-indigo-850 px-1.5 py-0.5 rounded font-mono font-bold">
-                              {grouped[placeName].length} {grouped[placeName].length === 1 ? 'Customer' : 'Customers'}
-                            </span>
-                          </h3>
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-4">
-                          {grouped[placeName].map((item, idx) => (
-                            <FollowUpContactCard 
-                              key={item.mobile || item.name || idx}
-                              index={idx + 1}
-                              item={item}
-                              onCall={handleCall}
-                              onWhatsApp={handleWhatsApp}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+                     <p className="text-xs font-semibold">No contacts found</p>
+                     <p className="text-[10px]">Try searching for something else or register a site visit first.</p>
                   </div>
                 );
               }
 
               return (
-                <div className="grid grid-cols-1 gap-4 w-full max-w-lg mx-auto" id="followup-singlegrid-view">
-                  {filteredFollowups.map((item, idx) => (
-                    <FollowUpContactCard 
-                      key={item.mobile || item.name || idx}
-                      index={idx + 1}
-                      item={item}
-                      onCall={handleCall}
-                      onWhatsApp={handleWhatsApp}
-                    />
-                  ))}
-                </div>
+                <VirtualizedFollowupList
+                  filteredFollowups={filteredFollowups}
+                  groupedFollowups={groupedFollowups}
+                  activeFollowupSubTab={activeFollowupSubTab}
+                  followupGroupMode={followupGroupMode}
+                  onCall={handleCall}
+                  onWhatsApp={handleWhatsApp}
+                />
               );
             })()}
           </div>
@@ -4839,22 +4873,42 @@ Report generated locally from zone sync.`;
                   <span>Completed Sites & Archives</span>
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Browse finalized sites, view full archived record histories, or restore client accounts back to active tracking.
+                  Browse finalized sites, view full archived record histories, or turn completed sites back to active sites.
                 </p>
               </div>
               
-              {/* Search field for Completed Sites */}
-              <div className="relative w-full md:w-72">
-                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                  <Search size={14} />
-                </span>
-                <input
-                  type="text"
-                  placeholder="Search completed sites..."
-                  value={completedSearchQuery}
-                  onChange={(e) => setCompletedSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-4 py-1.5 border border-slate-200 rounded-xl text-xs bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition text-slate-850 font-sans"
-                />
+              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                {completedCustomers.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (confirm(`Are you sure you want to turn all ${completedCustomers.length} completed sites back into active sites?`)) {
+                        if (onToggleCompleteCustomer) {
+                          const mobiles = completedCustomers.map(c => c.mobile);
+                          await onToggleCompleteCustomer(mobiles, false);
+                        }
+                      }
+                    }}
+                    className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <RefreshCw size={13} className="text-indigo-600" />
+                    <span>Turn All to Active Sites</span>
+                  </button>
+                )}
+
+                {/* Search field for Completed Sites */}
+                <div className="relative w-full md:w-64">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                    <Search size={14} />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Search completed sites..."
+                    value={completedSearchQuery}
+                    onChange={(e) => setCompletedSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-4 py-1.5 border border-slate-200 rounded-xl text-xs bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition text-slate-850 font-sans"
+                  />
+                </div>
               </div>
             </div>
 
@@ -4936,7 +4990,7 @@ Report generated locally from zone sync.`;
                             className="py-1.5 bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-700 rounded-lg text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
                           >
                             <RefreshCw size={11} className="text-teal-650" />
-                            <span>Restore</span>
+                            <span>Turn to Active</span>
                           </button>
 
                           {/* Permanently delete shortcut button */}
@@ -5613,7 +5667,7 @@ Report generated locally from zone sync.`;
                   {selectedDirItem.data.isCompleted ? (
                     <>
                       <RefreshCw size={13} />
-                      <span>Restore customer</span>
+                      <span>Turn to Active Site</span>
                     </>
                   ) : (
                     <>

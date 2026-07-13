@@ -331,6 +331,16 @@ export default function App() {
 
     try {
       await saveVisit(finalVisit);
+      // If the saved visit is not completed, automatically reactivate any other visits of this customer to keep them consistently active
+      if (!finalVisit.isCompleted && finalVisit.clientMobile) {
+        const otherCompletedVisits = visits.filter(v => v.clientMobile === finalVisit.clientMobile && v.id !== finalVisit.id && v.isCompleted);
+        for (const av of otherCompletedVisits) {
+          await saveVisit({
+            ...av,
+            isCompleted: false
+          });
+        }
+      }
       // Reload visits
       const records = await getAllVisits(currentUser?.mobile);
       setVisits(records);
@@ -344,11 +354,14 @@ export default function App() {
   };
 
   // Toggle client completion status handler
-  const handleToggleCompleteCustomer = async (mobile: string, isCompleted: boolean) => {
+  const handleToggleCompleteCustomer = async (mobile: string | string[], isCompleted: boolean) => {
     try {
-      const associatedVisits = visits.filter(v => v.clientMobile === mobile);
+      const mobiles = Array.isArray(mobile) ? mobile : [mobile];
+      if (mobiles.length === 0) return;
+
+      const associatedVisits = visits.filter(v => mobiles.includes(v.clientMobile));
       if (associatedVisits.length === 0) {
-        triggerToast("No visits found for this client.", "info");
+        triggerToast("No visits found for the selected client(s).", "info");
         return;
       }
       for (const v of associatedVisits) {
@@ -359,7 +372,11 @@ export default function App() {
       }
       const records = await getAllVisits(currentUser?.mobile);
       setVisits(records);
-      triggerToast(`Site marked as ${isCompleted ? 'completed/closed' : 'active'} successfully for ${associatedVisits[0].clientName || 'customer'}!`);
+      if (mobiles.length === 1) {
+        triggerToast(`Site marked as ${isCompleted ? 'completed/closed' : 'active'} successfully for ${associatedVisits[0].clientName || 'customer'}!`);
+      } else {
+        triggerToast(`Successfully turned ${mobiles.length} completed sites to active sites!`, 'success');
+      }
     } catch (err) {
       console.error("Failed to toggle completion for customer:", err);
       triggerToast("Failed to update status. Please try again.", "info");

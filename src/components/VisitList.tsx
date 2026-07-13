@@ -49,9 +49,9 @@ interface VisitListProps {
 }
 
 export default function VisitList({ visits, onDelete, onEdit }: VisitListProps) {
-  // Only customer present and customer absent sites
+  // Show all site visits (including customer and partner/contractor logs)
   const customerVisitsOnly = React.useMemo(() => {
-    return visits.filter(v => v.contractorType === 'none' || !v.contractorType);
+    return visits;
   }, [visits]);
 
   // Filters & Search
