@@ -183,6 +183,7 @@ export interface ExecutiveUser {
   name: string;
   mobile: string;
   zone: string;
+  companyName?: string;
   createdAt?: string;
 }
 
@@ -204,7 +205,7 @@ export async function fetchUserFromFirestore(mobile: string): Promise<ExecutiveU
       handleFirestoreError(error, OperationType.GET, userPath);
     } else {
       console.warn("Firestore connection/get issue on user profile.", error);
-      return null;
+      throw error;
     }
   }
 }

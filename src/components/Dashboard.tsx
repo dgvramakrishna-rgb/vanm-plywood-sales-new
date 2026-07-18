@@ -61,6 +61,18 @@ import {
   sendLocalNotification,
   playProximityBeep
 } from '../utils/notifications';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+
+interface LocationServicePluginType {
+  startService(options: { clients: string }): Promise<{ status: string }>;
+  stopService(): Promise<{ status: string }>;
+  checkBatteryOptimization(): Promise<{ isIgnored: boolean }>;
+  requestIgnoreBatteryOptimization(): Promise<{ status: string }>;
+  checkExactAlarmPermission(): Promise<{ hasPermission: boolean }>;
+  requestExactAlarmPermission(): Promise<{ status: string }>;
+}
+
+const LocationServicePlugin = registerPlugin<LocationServicePluginType>('LocationServicePlugin');
 
 // Helper to open URLs externally in Capacitor or native contexts gracefully
 const openExternalUrl = (url: string) => {
@@ -132,6 +144,28 @@ export default function Dashboard({
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  const [androidBatteryExempt, setAndroidBatteryExempt] = useState<boolean | null>(null);
+  const [androidExactAlarm, setAndroidExactAlarm] = useState<boolean | null>(null);
+
+  const checkAndroidSettings = () => {
+    if (Capacitor.getPlatform() === 'android') {
+      LocationServicePlugin.checkBatteryOptimization()
+        .then(res => setAndroidBatteryExempt(res.isIgnored))
+        .catch(err => console.warn('Battery check error', err));
+      LocationServicePlugin.checkExactAlarmPermission()
+        .then(res => setAndroidExactAlarm(res.hasPermission))
+        .catch(err => console.warn('Alarm check error', err));
+    }
+  };
+
+  React.useEffect(() => {
+    checkAndroidSettings();
+    window.addEventListener('focus', checkAndroidSettings);
+    return () => {
+      window.removeEventListener('focus', checkAndroidSettings);
+    };
+  }, []);
   const [dealersSearchQuery, setDealersSearchQuery] = useState('');
   const [completedSearchQuery, setCompletedSearchQuery] = useState('');
   const [placesSearchQuery, setPlacesSearchQuery] = useState('');
@@ -165,6 +199,7 @@ export default function Dashboard({
       setProfName(initialCurrentUser.name);
       setProfCompany(initialCurrentUser.companyName || 'Sales Pro');
       setProfMobile(initialCurrentUser.mobile);
+      setReportUserName(initialCurrentUser.name);
     }
   }, [initialCurrentUser]);
 
@@ -1717,6 +1752,8 @@ Report generated locally from zone sync.`;
             <span className="text-center">Site Map</span>
           </button>
 
+
+
           <button
             onClick={() => setActiveHomeTab('reports')}
             className={`p-3 rounded-xl text-[10px] font-extrabold flex flex-col items-center justify-center gap-2 transition cursor-pointer font-sans border ${
@@ -1899,6 +1936,78 @@ Report generated locally from zone sync.`;
 
       {activeHomeTab === 'map' && (
         <div className="space-y-4 animate-fade-in" id="site-map-view">
+          {Capacitor.getPlatform() === 'android' && (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-md text-white space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-xl">
+                  <Bell size={20} className="animate-pulse" />
+                </div>
+                <div className="space-y-1 flex-1">
+                  <h3 className="text-sm font-extrabold tracking-tight">Android Background Tracker Settings</h3>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Android systems automatically sleep or shut down background apps to save battery. To ensure you receive proximity alerts and GPS track notifications <strong>even when the application is closed</strong>, please enable these essential system settings:
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                {/* Battery Optimization Card */}
+                <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">Battery Exemption</span>
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold ${androidBatteryExempt ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/15 text-rose-400 border border-rose-500/20'}`}>
+                        {androidBatteryExempt ? 'ENABLED' : 'RESTRICTED'}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-normal">
+                      Allows the background proximity sensor to run without being paused or killed when your phone goes to sleep.
+                    </p>
+                  </div>
+                  {!androidBatteryExempt && (
+                    <button
+                      onClick={() => {
+                        LocationServicePlugin.requestIgnoreBatteryOptimization()
+                          .then(() => onTriggerToast?.('Battery exemption settings opened.', 'info'))
+                          .catch(err => console.error(err));
+                      }}
+                      className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition text-center cursor-pointer"
+                    >
+                      Disable Battery Optimization
+                    </button>
+                  )}
+                </div>
+
+                {/* Exact Alarms Card */}
+                <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">Exact Alarms</span>
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold ${androidExactAlarm ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/15 text-rose-400 border border-rose-500/20'}`}>
+                        {androidExactAlarm ? 'ENABLED' : 'DISABLED'}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-normal">
+                      Allows scheduling exact wake-up jobs to instantly restart the sensor service when swiped away or closed.
+                    </p>
+                  </div>
+                  {!androidExactAlarm && (
+                    <button
+                      onClick={() => {
+                        LocationServicePlugin.requestExactAlarmPermission()
+                          .then(() => onTriggerToast?.('Exact alarm settings opened.', 'info'))
+                          .catch(err => console.error(err));
+                      }}
+                      className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition text-center cursor-pointer"
+                    >
+                      Allow Exact Alarms
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
             <div className="p-4 bg-indigo-600 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
               <div className="space-y-0.5">
@@ -1956,6 +2065,8 @@ Report generated locally from zone sync.`;
           </div>
         </div>
       )}
+
+
 
       {activeHomeTab === 'places' && (
         <div className="space-y-6 animate-fade-in" id="places-visit-dashboard">

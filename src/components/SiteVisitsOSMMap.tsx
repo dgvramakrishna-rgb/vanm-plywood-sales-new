@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
-import { Navigation, MapPin, Crosshair, Map as MapIcon, Layers, Phone, Calendar, User, Home, CheckCircle, Edit2, Maximize2, X, MessageCircle, History, ZoomIn, ZoomOut, Compass, ChevronRight, Search, Target } from 'lucide-react';
+import { Navigation, MapPin, Crosshair, Map as MapIcon, Layers, Phone, Calendar, User, Home, CheckCircle, Edit2, Maximize2, X, MessageCircle, History, ZoomIn, ZoomOut, Compass, ChevronRight, Search, Target, Radio, Sliders, BellRing } from 'lucide-react';
 import { sendLocalNotification, playProximityBeep } from '../utils/notifications';
 import { calculateDistance } from '../utils/geoUtils';
 import { SiteVisit } from '../types';
@@ -316,6 +316,25 @@ export default function SiteVisitsOSMMap({
   const [mapViewMode, setMapViewMode] = useState<'clients' | 'carpenters' | 'interiors' | 'builders'>('clients');
   const notifiedVisits = useRef<Set<string>>(new Set());
 
+  // Geofencing options for OpenStreetMap
+  const [isGeofenceEnabled, setIsGeofenceEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('osm_geofence_enabled');
+    return saved !== 'false';
+  });
+  const [geofenceRadius, setGeofenceRadius] = useState<number>(() => {
+    const saved = localStorage.getItem('osm_geofence_radius');
+    return saved ? parseInt(saved, 10) : 100;
+  });
+  const [isSettingsExpanded, setIsSettingsExpanded] = useState<boolean>(true);
+
+  useEffect(() => {
+    localStorage.setItem('osm_geofence_enabled', isGeofenceEnabled.toString());
+  }, [isGeofenceEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('osm_geofence_radius', geofenceRadius.toString());
+  }, [geofenceRadius]);
+
   // Follow Mode and Heading Auto-rotate states
   const [followMode, setFollowMode] = useState(true);
   const [heading, setHeading] = useState(0);
@@ -329,6 +348,7 @@ export default function SiteVisitsOSMMap({
 
   useEffect(() => {
     if (userLocation) {
+      const activeRadiusKm = isGeofenceEnabled ? (geofenceRadius / 1000) : 0.05;
       visits.forEach(visit => {
         if (visit.latitude && visit.longitude) {
           const distance = calculateDistance(
@@ -338,17 +358,17 @@ export default function SiteVisitsOSMMap({
             visit.longitude
           );
           
-          if (distance < 0.05 && !notifiedVisits.current.has(visit.id)) {
+          if (distance < activeRadiusKm && !notifiedVisits.current.has(visit.id)) {
             sendLocalNotification('Proximity Alert', `You are near ${visit.clientName}!`);
             playProximityBeep();
             notifiedVisits.current.add(visit.id);
-          } else if (distance >= 0.05) {
+          } else if (distance >= activeRadiusKm) {
             notifiedVisits.current.delete(visit.id);
           }
         }
       });
     }
-  }, [userLocation, visits]);
+  }, [userLocation, visits, isGeofenceEnabled, geofenceRadius]);
 
   // Real-time device orientation / compass tracking
   useEffect(() => {
@@ -604,10 +624,27 @@ export default function SiteVisitsOSMMap({
             const builderMobile = visit.builderMobile || (visit.contractorType === 'builder' ? visit.contractorMobile : '') || '';
             const builderPlace = visit.builderPlace || (visit.contractorType === 'builder' ? visit.contractorAddress : '') || 'N/A';
 
+            const isInside = userLocation && visit.latitude && visit.longitude && (
+              calculateDistance(userLocation[0], userLocation[1], visit.latitude, visit.longitude) * 1000 <= geofenceRadius
+            );
+
             return (
-              <Marker 
-                key={visit.id} 
-                position={[visit.latitude!, visit.longitude!]}
+              <React.Fragment key={visit.id}>
+                {isGeofenceEnabled && visit.latitude && visit.longitude && (
+                  <Circle
+                    center={[visit.latitude, visit.longitude]}
+                    radius={geofenceRadius}
+                    pathOptions={{
+                      fillColor: isInside ? '#10b981' : '#6366f1',
+                      fillOpacity: isInside ? 0.22 : 0.07,
+                      color: isInside ? '#10b981' : '#4f46e5',
+                      weight: isInside ? 2.5 : 1.2,
+                      dashArray: isInside ? undefined : '4, 4'
+                    }}
+                  />
+                )}
+                <Marker 
+                  position={[visit.latitude!, visit.longitude!]}
                 icon={
                   visit.isCompleted
                     ? completedIcon
@@ -873,9 +910,189 @@ export default function SiteVisitsOSMMap({
                   </div>
                 </Popup>
               </Marker>
-            );
-          })}
+            </React.Fragment>
+          );
+        })}
         </MapContainer>
+
+        {/* Floating Geofencing Control Panel (Top-Left) */}
+        {(() => {
+          const enteredSites = visitsWithCoords.filter(visit => {
+            if (!userLocation || !visit.latitude || !visit.longitude || visit.isCompleted) return false;
+            const distInKm = calculateDistance(
+              userLocation[0],
+              userLocation[1],
+              visit.latitude,
+              visit.longitude
+            );
+            return distInKm * 1000 <= geofenceRadius;
+          });
+
+          return (
+            <div className="absolute top-4 left-4 z-[1000] flex flex-col items-start gap-2 max-w-[280px] sm:max-w-[320px]">
+              {!isSettingsExpanded ? (
+                <button
+                  onClick={() => setIsSettingsExpanded(true)}
+                  className="p-3 bg-slate-900/95 hover:bg-slate-800 text-white rounded-full shadow-2xl border border-slate-700/80 flex items-center justify-center cursor-pointer transition relative group"
+                  title="Expand Geofence Settings"
+                >
+                  <Radio size={18} className={`${isGeofenceEnabled ? 'text-emerald-400 animate-pulse' : 'text-slate-400'}`} />
+                  {isGeofenceEnabled && enteredSites.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full text-[9px] font-black flex items-center justify-center text-white border border-slate-900">
+                      {enteredSites.length}
+                    </span>
+                  )}
+                </button>
+              ) : (
+                <div className="bg-slate-900/95 text-white backdrop-blur border border-slate-800 rounded-2xl p-4 shadow-2xl w-72 sm:w-80 flex flex-col gap-3 animate-fade-in relative">
+                  {/* Header */}
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-indigo-500/10 text-indigo-400 rounded-lg">
+                        <Radio size={14} className={isGeofenceEnabled ? 'animate-pulse' : ''} />
+                      </div>
+                      <div>
+                        <h3 className="text-xs font-black tracking-tight text-white uppercase font-mono">Geofencing Radar</h3>
+                        <p className="text-[9px] text-slate-400 font-medium">OSM boundary analysis</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${isGeofenceEnabled ? 'bg-emerald-500 animate-ping' : 'bg-slate-500'}`}></span>
+                      <button 
+                        onClick={() => setIsSettingsExpanded(false)}
+                        className="p-1 hover:bg-white/10 text-slate-400 hover:text-white rounded transition cursor-pointer"
+                        title="Minimize"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Toggle Switch */}
+                  <div className="flex items-center justify-between bg-white/5 p-2 rounded-xl border border-white/5">
+                    <span className="text-[10px] font-bold text-slate-300 font-mono">OSM GEOFENCE LAYER</span>
+                    <button
+                      onClick={() => setIsGeofenceEnabled(!isGeofenceEnabled)}
+                      className={`w-10 h-5.5 rounded-full p-0.5 transition-colors duration-200 cursor-pointer ${
+                        isGeofenceEnabled ? 'bg-indigo-600' : 'bg-slate-700'
+                      }`}
+                    >
+                      <div className={`w-4.5 h-4.5 bg-white rounded-full shadow-md transform transition-transform duration-200 ${
+                        isGeofenceEnabled ? 'translate-x-4.5' : 'translate-x-0'
+                      }`} />
+                    </button>
+                  </div>
+
+                  {isGeofenceEnabled && (
+                    <>
+                      {/* Slider Control */}
+                      <div className="space-y-1.5 bg-white/5 p-2.5 rounded-xl border border-white/5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-slate-300 flex items-center gap-1">
+                            <Sliders size={11} className="text-indigo-400" />
+                            <span>FENCE RADIUS</span>
+                          </span>
+                          <span className="text-[10px] font-black text-indigo-400 font-mono bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
+                            {geofenceRadius} meters
+                          </span>
+                        </div>
+                        <input 
+                          type="range"
+                          min="50"
+                          max="1000"
+                          step="50"
+                          value={geofenceRadius}
+                          onChange={(e) => setGeofenceRadius(parseInt(e.target.value, 10))}
+                          className="w-full accent-indigo-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg appearance-none"
+                        />
+                        <div className="flex justify-between text-[8px] text-slate-500 font-semibold font-mono">
+                          <span>50m</span>
+                          <span>200m</span>
+                          <span>500m</span>
+                          <span>1km</span>
+                        </div>
+                      </div>
+
+                      {/* Breach List */}
+                      <div className="space-y-1.5">
+                        <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider font-mono flex items-center gap-1">
+                          <BellRing size={10} className="text-emerald-400" />
+                          <span>Active Entries ({enteredSites.length})</span>
+                        </span>
+
+                        <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
+                          {enteredSites.length === 0 ? (
+                            <div className="text-[10px] text-slate-500 py-3 text-center border border-dashed border-slate-800 rounded-xl bg-slate-950/20 leading-relaxed font-medium">
+                              No active geofence entries.<br/>Move closer to client locations.
+                            </div>
+                          ) : (
+                            enteredSites.map(visit => {
+                              const dist = userLocation ? Math.round(calculateDistance(userLocation[0], userLocation[1], visit.latitude!, visit.longitude!) * 1000) : 0;
+                              return (
+                                <div key={visit.id} className="bg-emerald-950/30 border border-emerald-500/20 hover:border-emerald-500/40 p-2 rounded-xl transition flex flex-col gap-1.5">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <h4 className="text-[10px] font-black text-slate-100 truncate leading-tight flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                                        <span>{visit.clientName}</span>
+                                      </h4>
+                                      <p className="text-[8px] text-emerald-400 font-mono mt-0.5 font-bold flex items-center gap-1">
+                                        <Navigation size={8} />
+                                        <span>{dist}m away (Inside fence)</span>
+                                      </p>
+                                    </div>
+                                    <button 
+                                      onClick={() => {
+                                        setMapCenter([visit.latitude!, visit.longitude!]);
+                                        setZoom(17);
+                                        setSelectedVisitId(visit.id);
+                                      }}
+                                      className="text-[8px] bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white px-2 py-1 rounded-lg border border-slate-700 font-bold transition cursor-pointer"
+                                    >
+                                      Locate
+                                    </button>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+                                    <button
+                                      onClick={() => {
+                                        if (onWhatsApp) {
+                                          onWhatsApp(visit.clientMobile, visit.clientName);
+                                        } else if (visit.clientMobile) {
+                                          window.open(`https://wa.me/${visit.clientMobile}`, '_blank');
+                                        }
+                                      }}
+                                      className="py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[9px] font-black rounded-lg transition text-center cursor-pointer flex items-center justify-center gap-1"
+                                    >
+                                      <MessageCircle size={10} />
+                                      <span>WhatsApp</span>
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        if (confirm(`Mark ${visit.clientName} as completed?`)) {
+                                          onCompleteVisit?.(visit);
+                                        }
+                                      }}
+                                      className="py-1 bg-white hover:bg-slate-100 text-slate-900 text-[9px] font-black rounded-lg transition text-center cursor-pointer flex items-center justify-center gap-1 border border-slate-200 shadow-sm"
+                                    >
+                                      <CheckCircle size={10} className="text-emerald-500" />
+                                      <span>Complete</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Custom Map Controls Overlay */}
         <div className="absolute top-4 right-4 z-[1000] flex flex-col gap-2">

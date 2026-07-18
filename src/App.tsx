@@ -16,7 +16,9 @@ import {
   deleteDealerFromFirestore,
   sanitizeDocId,
   isMobileMatch,
-  clearOlderSyncedVisits
+  clearOlderSyncedVisits,
+  saveUserToFirestore,
+  fetchUserFromFirestore
 } from './db';
 import { SiteVisit, Dealer } from './types';
 import { useBackgroundSync } from './syncService';
@@ -170,16 +172,18 @@ export default function App() {
   // Top header Profile settings dropdown states
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [profName, setProfName] = useState(currentUser?.name || '');
-  const [profCompany, setProfCompany] = useState(currentUser?.companyName || 'Sales Pro');
+  const [profCompany, setProfCompany] = useState(currentUser?.companyName || '');
   const [profMobile, setProfMobile] = useState(currentUser?.mobile || '');
+  const [profZone, setProfZone] = useState(currentUser?.zone || 'Central HQ');
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
 
   // Sync profile details if currentUser updates
   useEffect(() => {
     if (currentUser) {
       setProfName(currentUser.name);
-      setProfCompany(currentUser.companyName || 'Sales Pro');
+      setProfCompany(currentUser.companyName || '');
       setProfMobile(currentUser.mobile);
+      setProfZone(currentUser.zone || 'Central HQ');
     }
   }, [currentUser]);
 
@@ -196,6 +200,21 @@ export default function App() {
   const handleUpdateProfile = (updated: { name: string; mobile: string; zone: string; companyName?: string }) => {
     setCurrentUser(updated);
     localStorage.setItem('fieldconnect_user', JSON.stringify(updated));
+    if (updated.mobile) {
+      localStorage.setItem(`fieldconnect_user_cache_${updated.mobile}`, JSON.stringify(updated));
+    }
+    
+    // Also save user profile to Firestore so it is stored in the cloud
+    saveUserToFirestore({
+      id: 'usr_' + updated.mobile,
+      name: updated.name,
+      mobile: updated.mobile,
+      zone: updated.zone,
+      companyName: updated.companyName || ''
+    }).catch(err => {
+      console.warn("Could not sync profile to Firestore:", err);
+    });
+
     triggerToast('Profile updated successfully.');
   };
 
@@ -214,7 +233,7 @@ export default function App() {
       ...currentUser,
       name: profName.trim(),
       mobile: cleanNumber,
-      zone: currentUser?.zone || 'Central HQ',
+      zone: profZone,
       companyName: profCompany.trim()
     };
     handleUpdateProfile(updated as any);
@@ -290,6 +309,25 @@ export default function App() {
         testFirebaseConnection().catch(err => {
           console.warn("Background firebase connection verification warn:", err);
         });
+
+        // 2.5. Background refresh user profile from Firestore to keep local details synchronized
+        fetchUserFromFirestore(currentUser.mobile)
+          .then(freshUser => {
+            if (freshUser) {
+              const mergedUser = {
+                ...currentUser,
+                name: freshUser.name || '',
+                zone: freshUser.zone || 'Central HQ',
+                companyName: freshUser.companyName || ''
+              };
+              setCurrentUser(mergedUser);
+              localStorage.setItem('fieldconnect_user', JSON.stringify(mergedUser));
+              localStorage.setItem(`fieldconnect_user_cache_${currentUser.mobile}`, JSON.stringify(mergedUser));
+            }
+          })
+          .catch(profileErr => {
+            console.warn("Could not background refresh user profile from Firestore:", profileErr);
+          });
 
         // 3. Keep loading state up-to-date with remote server changes in the background
         const records = await getAllVisits(currentUser.mobile);
@@ -504,6 +542,12 @@ export default function App() {
           onLoginSuccess={(userData) => {
             setCurrentUser(userData);
             localStorage.setItem('fieldconnect_user', JSON.stringify(userData));
+            if (userData.mobile) {
+              localStorage.setItem(`fieldconnect_user_cache_${userData.mobile}`, JSON.stringify(userData));
+            }
+            if (userData.isNewUser) {
+              setIsProfileOpen(true);
+            }
             triggerToast(`Welcome back, ${userData.name}!`);
           }} 
         />
@@ -723,7 +767,7 @@ export default function App() {
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.96, y: -10 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute right-0 top-14 w-80 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-2xl shadow-2xl border border-slate-200/90 dark:border-slate-800 p-5 z-50 mt-1 space-y-4 font-sans"
+                    className="absolute right-0 top-14 w-80 max-w-[calc(100vw-24px)] bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-2xl shadow-2xl border border-slate-200/90 dark:border-slate-800 p-5 z-50 mt-1 space-y-4 font-sans"
                     id="header-profile-dropdown"
                   >
                     {/* Popover Header */}
@@ -742,143 +786,171 @@ export default function App() {
                         <X size={15} />
                       </button>
                     </div>
-
-                    {/* Form Controls */}
-                    <div className="space-y-3 mr-0.5">
-                      
-                      {/* Employee Name */}
-                      <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                          Employee Name *
-                        </label>
-                        <div className="relative">
-                          <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-xs text-slate-400 dark:text-slate-500 pointer-events-none">
-                            👤
+                                   {/* Scrollable list of options */}
+                    <div 
+                      className="max-h-[210px] overflow-y-auto pr-1.5 space-y-4 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 dark:[&::-webkit-scrollbar-thumb]:bg-slate-850 [&::-webkit-scrollbar-thumb]:rounded-full" 
+                      id="profile-scrollable-options"
+                    >
+                      {/* Section 1: Executive Profile (List Wise) */}
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-1 pb-1 border-b border-slate-100 dark:border-slate-800/60">
+                          <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
+                            👤 Profile Information
                           </span>
-                          <input
-                            type="text"
-                            required
-                            value={profName}
-                            onChange={(e) => setProfName(e.target.value)}
-                            className="w-full pl-8 pr-3 py-1.5 border border-slate-200 dark:border-slate-850 rounded-lg text-xs bg-slate-50/50 dark:bg-slate-950/40 focus:outline-none focus:ring-2 focus:ring-indigo-600 dark:focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100 font-semibold transition"
-                            placeholder="e.g. Ramakrishna"
-                          />
+                        </div>
+
+                        {/* List Option 1: Employee Name */}
+                        <div className="space-y-1 bg-slate-50/40 dark:bg-slate-950/10 p-2.5 rounded-xl border border-slate-100 dark:border-slate-850/40 hover:border-indigo-100 dark:hover:border-indigo-900/30 transition">
+                          <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                            Employee Name *
+                          </label>
+                          <div className="relative">
+                            <span className="absolute inset-y-0 left-0 pl-2 flex items-center text-xs text-slate-400 dark:text-slate-500 pointer-events-none">
+                              👤
+                            </span>
+                            <input
+                              type="text"
+                              required
+                              value={profName}
+                              onChange={(e) => setProfName(e.target.value)}
+                              className="w-full pl-7 pr-2 py-1 border border-slate-200 dark:border-slate-800 rounded-lg text-xs bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-600 text-slate-800 dark:text-slate-100 font-semibold transition"
+                              placeholder="e.g. Ramakrishna"
+                            />
+                          </div>
+                        </div>
+
+                        {/* List Option 2: Company Name */}
+                        <div className="space-y-1 bg-slate-50/40 dark:bg-slate-950/10 p-2.5 rounded-xl border border-slate-100 dark:border-slate-850/40 hover:border-indigo-100 dark:hover:border-indigo-900/30 transition">
+                          <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                            Company Name
+                          </label>
+                          <div className="relative">
+                            <span className="absolute inset-y-0 left-0 pl-2 flex items-center text-xs text-slate-400 dark:text-slate-500 pointer-events-none">
+                              🏢
+                            </span>
+                            <input
+                              type="text"
+                              value={profCompany}
+                              onChange={(e) => setProfCompany(e.target.value)}
+                              className="w-full pl-7 pr-2 py-1 border border-slate-200 dark:border-slate-800 rounded-lg text-xs bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-600 text-slate-800 dark:text-slate-100 font-semibold transition"
+                              placeholder="e.g. Welspun Industries"
+                            />
+                          </div>
+                        </div>
+
+                        {/* List Option 3: Mobile Number */}
+                        <div className="space-y-1 bg-slate-50/40 dark:bg-slate-950/10 p-2.5 rounded-xl border border-slate-100 dark:border-slate-850/40 hover:border-indigo-100 dark:hover:border-indigo-900/30 transition">
+                          <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                            Registered Mobile *
+                          </label>
+                          <div className="relative">
+                            <span className="absolute inset-y-0 left-0 pl-2 flex items-center text-xs text-slate-400 dark:text-slate-500 pointer-events-none">
+                              📞
+                            </span>
+                            <input
+                              type="tel"
+                              required
+                              value={profMobile}
+                              onChange={(e) => setProfMobile(e.target.value)}
+                              className="w-full pl-7 pr-2 py-1 border border-slate-200 dark:border-slate-800 rounded-lg text-xs bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-600 text-slate-800 dark:text-slate-100 font-semibold transition"
+                              placeholder="10 digit number"
+                            />
+                          </div>
+                        </div>
+
+                        {/* List Option 4: Management Zone */}
+                        <div className="space-y-1 bg-slate-50/40 dark:bg-slate-950/10 p-2.5 rounded-xl border border-slate-100 dark:border-slate-850/40 hover:border-indigo-100 dark:hover:border-indigo-900/30 transition">
+                          <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                            Management Zone
+                          </label>
+                          <div className="relative">
+                            <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-xs text-slate-400 dark:text-slate-500 pointer-events-none">
+                              📍
+                            </span>
+                            <select
+                              value={profZone}
+                              onChange={(e) => setProfZone(e.target.value)}
+                              className="w-full pl-7 pr-2 py-1 border border-slate-200 dark:border-slate-800 rounded-lg text-xs bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-600 text-slate-800 dark:text-slate-100 font-semibold transition cursor-pointer"
+                            >
+                              <option value="Central HQ">Central HQ</option>
+                              <option value="North Division">North Division</option>
+                              <option value="South Division">South Division</option>
+                              <option value="East Division">East Division</option>
+                              <option value="West Division">West Division</option>
+                              <option value="Metro Star Zone">Metro Star Zone</option>
+                            </select>
+                          </div>
                         </div>
                       </div>
 
-                      {/* Company Name */}
-                      <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                          Company Name
-                        </label>
-                        <div className="relative">
-                          <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-xs text-slate-400 dark:text-slate-500 pointer-events-none">
-                            🏢
+                      {/* Section 2: Preferences (List Wise) */}
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-1 pb-1 border-b border-slate-100 dark:border-slate-800/60">
+                          <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
+                            🎨 Display Preferences
                           </span>
-                          <input
-                            type="text"
-                            value={profCompany}
-                            onChange={(e) => setProfCompany(e.target.value)}
-                            className="w-full pl-8 pr-3 py-1.5 border border-slate-200 dark:border-slate-850 rounded-lg text-xs bg-slate-50/50 dark:bg-slate-950/40 focus:outline-none focus:ring-2 focus:ring-indigo-600 dark:focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100 font-semibold transition"
-                            placeholder="e.g. Welspun Industries"
-                          />
+                        </div>
+
+                        {/* List Option 5: Theme Mode */}
+                        <div className="space-y-1.5 bg-slate-50/40 dark:bg-slate-950/10 p-2.5 rounded-xl border border-slate-100 dark:border-slate-850/40 hover:border-indigo-100 dark:hover:border-indigo-900/30 transition">
+                          <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                            Theme Mode
+                          </label>
+                          <div className="flex bg-slate-100 dark:bg-slate-955 p-0.5 rounded-lg border border-slate-200/40 dark:border-slate-800/80 gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setTheme('light')}
+                              className={`flex-1 py-1.5 px-3 text-[11px] font-bold rounded-md transition-all duration-150 cursor-pointer flex items-center justify-center gap-1 ${
+                                theme === 'light'
+                                  ? 'bg-white text-indigo-750 font-black shadow-xs'
+                                  : 'text-slate-550 dark:text-slate-400 hover:text-slate-850 dark:hover:text-slate-300'
+                              }`}
+                            >
+                              <span>☀️ Light</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setTheme('dark')}
+                              className={`flex-1 py-1.5 px-3 text-[11px] font-bold rounded-md transition-all duration-150 cursor-pointer flex items-center justify-center gap-1 ${
+                                theme === 'dark'
+                                  ? 'bg-slate-800 text-indigo-400 font-black shadow-xs'
+                                  : 'text-slate-550 dark:text-slate-400 hover:text-slate-850 dark:hover:text-slate-300'
+                              }`}
+                            >
+                              <span>🌙 Dark</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
 
-                      {/* Mobile Number */}
-                      <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                          Mobile Number *
-                        </label>
-                        <div className="relative">
-                          <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-xs text-slate-400 dark:text-slate-500 pointer-events-none">
-                            📞
+                      {/* Section 3: Data & Operations (List Wise Actions) */}
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-1 pb-1 border-b border-slate-100 dark:border-slate-800/60">
+                          <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
+                            ⚡ Data Management
                           </span>
-                          <input
-                            type="tel"
-                            required
-                            value={profMobile}
-                            onChange={(e) => setProfMobile(e.target.value)}
-                            className="w-full pl-8 pr-3 py-1.5 border border-slate-200 dark:border-slate-850 rounded-lg text-xs bg-slate-50/50 dark:bg-slate-950/40 focus:outline-none focus:ring-2 focus:ring-indigo-600 dark:focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100 font-semibold transition"
-                            placeholder="10 digit number"
-                          />
                         </div>
-                      </div>
 
-                      {/* Theme Mode Toggle */}
-                      <div className="space-y-1.5 pt-1" id="theme-toggle-form-group">
-                        <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                          Theme Mode
-                        </label>
-                        <div className="flex bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200/40 dark:border-slate-800/80 gap-0.5">
-                          <button
-                            type="button"
-                            onClick={() => setTheme('light')}
-                            className={`flex-1 py-1.5 px-3 text-xs font-bold rounded-md transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
-                              theme === 'light'
-                                ? 'bg-white text-indigo-750 font-black shadow-xs'
-                                : 'text-slate-550 dark:text-slate-400 hover:text-slate-850 dark:hover:text-slate-300'
-                            }`}
-                            id="theme-toggle-light"
-                          >
-                            <span>☀️ Light</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setTheme('dark')}
-                            className={`flex-1 py-1.5 px-3 text-xs font-bold rounded-md transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
-                              theme === 'dark'
-                                ? 'bg-slate-855 dark:bg-slate-800 text-indigo-400 font-black shadow-xs'
-                                : 'text-slate-550 dark:text-slate-400 hover:text-slate-850 dark:hover:text-slate-300'
-                            }`}
-                            id="theme-toggle-dark"
-                          >
-                            <span>🌙 Dark</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Backup Data Action */}
-                      <div className="pt-1">
+                        {/* List Option 6: Backup Data */}
                         <button
                           type="button"
                           onClick={handleBackupData}
-                          className="w-full flex items-center justify-between px-3 py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-slate-850 dark:hover:bg-slate-800 border border-indigo-100 dark:border-slate-800 rounded-xl transition cursor-pointer group"
+                          className="w-full flex items-center justify-between p-2.5 bg-indigo-50/40 hover:bg-indigo-50 dark:bg-slate-850/30 dark:hover:bg-slate-850/80 border border-slate-100 dark:border-slate-850 rounded-xl transition cursor-pointer text-left group"
                         >
                           <div className="flex items-center gap-2">
-                            <div className="p-1.5 bg-white dark:bg-slate-900 rounded-lg shadow-sm text-indigo-600 dark:text-indigo-400">
-                              <Download size={14} />
+                            <div className="p-1.5 bg-white dark:bg-slate-900 rounded-lg shadow-xs text-indigo-600 dark:text-indigo-400">
+                              <Download size={13} />
                             </div>
-                            <div className="text-left">
+                            <div>
                               <span className="block text-xs font-bold text-slate-800 dark:text-slate-200">Backup Data</span>
-                              <span className="block text-[9px] text-slate-500 font-medium leading-none mt-0.5">Export all records as JSON</span>
+                              <span className="block text-[9px] text-slate-500 font-medium mt-0.5 leading-none">Export all records to JSON</span>
                             </div>
                           </div>
                           <span className="text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity text-[10px]">➔</span>
                         </button>
-                      </div>
 
-                      {/* Clear Cache Action */}
-                      <div className="pt-1">
-                        <button
-                          type="button"
-                          onClick={handleClearCache}
-                          className="w-full flex items-center justify-between px-3 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 border border-rose-100 dark:border-rose-950/30 rounded-xl transition cursor-pointer group"
-                          title="Safely remove local synced visit records over 90 days old"
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="p-1.5 bg-white dark:bg-slate-900 rounded-lg shadow-sm text-rose-600 dark:text-rose-400">
-                              <Trash2 size={14} />
-                            </div>
-                            <div className="text-left">
-                              <span className="block text-xs font-bold text-rose-800 dark:text-rose-200">Clear Cache</span>
-                              <span className="block text-[9px] text-slate-500 font-medium leading-none mt-0.5">Purge synced visits &gt; 90 days</span>
-                            </div>
-                          </div>
-                          <span className="text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity text-[10px]">➔</span>
-                        </button>
-                      </div>
 
+                      </div>
                     </div>
 
                     {profileMessage && (

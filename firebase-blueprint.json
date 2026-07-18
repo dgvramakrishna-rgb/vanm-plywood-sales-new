@@ -17,6 +17,10 @@
           "type": "string",
           "description": "Territory region or sales division zone assigned to the user"
         },
+        "companyName": {
+          "type": "string",
+          "description": "Company or organization name of the employee profile"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
