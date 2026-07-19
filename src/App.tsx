@@ -931,23 +931,7 @@ export default function App() {
                           </span>
                         </div>
 
-                        {/* List Option 6: Backup Data */}
-                        <button
-                          type="button"
-                          onClick={handleBackupData}
-                          className="w-full flex items-center justify-between p-2.5 bg-indigo-50/40 hover:bg-indigo-50 dark:bg-slate-850/30 dark:hover:bg-slate-850/80 border border-slate-100 dark:border-slate-850 rounded-xl transition cursor-pointer text-left group"
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="p-1.5 bg-white dark:bg-slate-900 rounded-lg shadow-xs text-indigo-600 dark:text-indigo-400">
-                              <Download size={13} />
-                            </div>
-                            <div>
-                              <span className="block text-xs font-bold text-slate-800 dark:text-slate-200">Backup Data</span>
-                              <span className="block text-[9px] text-slate-500 font-medium mt-0.5 leading-none">Export all records to JSON</span>
-                            </div>
-                          </div>
-                          <span className="text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity text-[10px]">➔</span>
-                        </button>
+
 
 
                       </div>

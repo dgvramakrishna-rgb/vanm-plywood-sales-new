@@ -1301,15 +1301,21 @@ export default function SiteVisitsOSMMap({
 
         {/* Full Photo Modal */}
         {fullPhoto && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 p-4 animate-fade-in backdrop-blur-md">
+          <div 
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 p-4 animate-fade-in backdrop-blur-xl"
+            onClick={() => setFullPhoto(null)}
+          >
             <button 
-              onClick={() => setFullPhoto(null)}
-              className="absolute top-6 left-6 p-2 bg-black/50 hover:bg-black/70 rounded-lg text-white transition flex items-center gap-2 px-4 border border-white/20"
+              onClick={(e) => {
+                e.stopPropagation();
+                setFullPhoto(null);
+              }}
+              className="absolute top-6 left-6 p-4 bg-white/10 hover:bg-white/20 backdrop-blur-md rounded-full text-white transition flex items-center gap-2 px-6 shadow-2xl border border-white/20 z-[10000] cursor-pointer"
             >
-              <X size={20} />
-              <span className="font-bold text-sm">Back</span>
+              <X size={24} />
+              <span className="font-bold text-base">Close Image</span>
             </button>
-            <div className="relative max-w-4xl max-h-[90vh] w-full flex items-center justify-center">
+            <div className="relative max-w-4xl max-h-[90vh] w-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
               <img 
                 src={fullPhoto} 
                 alt="Full preview" 
