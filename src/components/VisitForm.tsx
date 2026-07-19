@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   User, 
+  Users,
   Phone, 
   MapPin, 
   Camera, 
@@ -161,6 +162,21 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
   const [showBuilderForm, setShowBuilderForm] = useState(() => {
     return !!(initialData?.builderName || (initialData?.contractorType === 'builder' && initialData.contractorName));
   });
+
+  const handlePartnerTypeChange = (type: string) => {
+    setShowInteriorForm(type === 'Interior Designer');
+    setShowCarpenterForm(type === 'Carpenter Partner');
+    setShowArchitectForm(type === 'Architect Specialist');
+    setShowBuilderForm(type === 'Builder Partner');
+  };
+
+  const getActivePartnerType = () => {
+    if (showInteriorForm) return 'Interior Designer';
+    if (showCarpenterForm) return 'Carpenter Partner';
+    if (showArchitectForm) return 'Architect Specialist';
+    if (showBuilderForm) return 'Builder Partner';
+    return 'None';
+  };
 
   // Dynamic previous client lookup and autocomplete purely via mobile number matching
   React.useEffect(() => {
@@ -635,10 +651,6 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
         setValidationError('📸 A snapped photo is required when the customer is not available, to aid revisiting.');
         return;
       }
-      if (!nearestLandmark.trim()) {
-        setValidationError('📍 Nearest Landmark is required when the customer is not available, to assist in future revisits.');
-        return;
-      }
     }
 
     // Carpentry mobile check if filled and shown
@@ -839,8 +851,7 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
               {/* Nearest Landmark Field */}
               <div className="mt-3">
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5 font-sans flex justify-between">
-                  <span>Nearest Landmark {customerNotAvailable && <span className="text-orange-600 font-bold">*</span>}</span>
-                  {!customerNotAvailable && <span className="text-[10px] text-slate-400 font-normal italic">Optional</span>}
+                  <span>Nearest Landmark <span className="text-slate-400 font-normal italic lowercase">(Optional)</span></span>
                 </label>
                 <div className="relative font-sans">
                   <span className="absolute inset-y-0 left-0 flex items-center pl-3">
@@ -848,7 +859,6 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
                   </span>
                   <input
                     type="text"
-                    required={customerNotAvailable}
                     placeholder="e.g. Opp Royal Club, near water tank"
                     value={nearestLandmark}
                     onChange={(e) => setNearestLandmark(e.target.value)}
@@ -890,7 +900,7 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
                       <div>
                         <span className="font-bold block text-xs">Revisit Info Required</span>
                         <span className="text-[10px] text-orange-855 block leading-normal mt-0.5">
-                          Because the customer is unavailable, the <strong>Nearest Landmark</strong> is marked as required, and you must supply a <strong>Site Photo</strong> below to guide future teams.
+                          Because the customer is unavailable, you must supply a <strong>Site Photo</strong> below to guide future teams.
                         </span>
                       </div>
                     </div>
@@ -1139,26 +1149,6 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
                     />
                   </div>
                 </div>
-
-                {/* Pincode field */}
-                <div className="space-y-1.5">
-                  <p className="block text-xs font-semibold text-slate-650 font-sans">
-                    Pincode / Postal Code <span className="text-slate-400 font-normal italic lowercase">(Optional)</span>
-                  </p>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                      <MapPin size={16} />
-                    </span>
-                    <input
-                      type="text"
-                      placeholder="e.g. 521101"
-                      value={pincode}
-                      onChange={(e) => setPincode(e.target.value)}
-                      className="w-full pl-9 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 transition"
-                      id="inp-pincode"
-                    />
-                  </div>
-                </div>
               {latitude && longitude && (
                 <div className="mt-1 text-[11px] font-mono text-indigo-600 flex items-center gap-1.5 bg-indigo-50/50 p-1.5 rounded-md border border-indigo-100/60 font-medium">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
@@ -1166,102 +1156,39 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
                 </div>
               )}
 
-              {/* SECTION: Choose Partners to Associate (user-select-wise) */}
+              {/* SECTION: Choose Partners to Associate (dropdown) */}
               <div className="mt-6 pt-5 border-t border-slate-100 space-y-3 col-span-1 md:col-span-2" id="partner-options-selector">
                 <div className="flex flex-col">
                   <span className="text-[11px] font-bold tracking-wider font-sans uppercase text-slate-500 flex items-center gap-1.5">
                     <span>🤝</span>
-                    <span>Associate Specialized partners (Optional)</span>
+                    <span>Associate Specialized Partner (Optional)</span>
                   </span>
                   <p className="text-[10px] text-slate-400 font-sans mt-0.5">
-                    Select which partner categories are active at this site to log their contact details.
+                    Select a partner category active at this site to log their contact details.
                   </p>
                 </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setShowInteriorForm(!showInteriorForm)}
-                    className={`p-3 rounded-xl border text-left transition relative flex items-center justify-between cursor-pointer ${
-                      showInteriorForm
-                        ? 'bg-teal-50/60 border-teal-200 shadow-xs ring-1 ring-teal-200'
-                        : 'bg-slate-50/50 border-slate-200 hover:bg-slate-55 text-slate-650'
-                    }`}
+                <div className="relative font-sans max-w-md">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                    <Users size={16} />
+                  </span>
+                  <select
+                    id="inp-site-partner"
+                    value={getActivePartnerType()}
+                    onChange={(e) => handlePartnerTypeChange(e.target.value)}
+                    className="w-full pl-9 pr-10 py-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 transition appearance-none cursor-pointer font-medium text-slate-800 interactive-highlight"
                   >
-                    <div className="flex items-center gap-2">
-                      <span className={`p-1.5 rounded-lg text-xs ${showInteriorForm ? 'bg-teal-100 text-teal-700 font-bold animate-pulse' : 'bg-slate-100 text-slate-500'}`}>🎨</span>
-                      <div>
-                        <span className="block text-xs font-bold font-sans text-slate-900 leading-none">Interior Designer</span>
-                        <span className="text-[10px] text-slate-400 font-sans mt-0.5 block leading-none">Design Profile</span>
-                      </div>
-                    </div>
-                    <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${showInteriorForm ? 'border-teal-500 bg-teal-500 text-white font-bold' : 'border-slate-300'}`}>
-                      {showInteriorForm && <span className="text-[9px] font-black leading-none">✓</span>}
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowCarpenterForm(!showCarpenterForm)}
-                    className={`p-3 rounded-xl border text-left transition relative flex items-center justify-between cursor-pointer ${
-                      showCarpenterForm
-                        ? 'bg-emerald-50/60 border-emerald-250 shadow-xs ring-1 ring-emerald-250'
-                        : 'bg-slate-50/50 border-slate-200 hover:bg-slate-55 text-slate-650'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={`p-1.5 rounded-lg text-xs ${showCarpenterForm ? 'bg-emerald-100 text-emerald-700 font-bold animate-pulse' : 'bg-slate-100 text-slate-500'}`}>🪚</span>
-                      <div>
-                        <span className="block text-xs font-bold font-sans text-slate-900 leading-none">Carpenter Partner</span>
-                        <span className="text-[10px] text-slate-400 font-sans mt-0.5 block leading-none">Woodwork Profile</span>
-                      </div>
-                    </div>
-                    <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${showCarpenterForm ? 'border-emerald-555 bg-emerald-500 text-white font-bold' : 'border-slate-300'}`}>
-                      {showCarpenterForm && <span className="text-[9px] font-black leading-none">✓</span>}
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowArchitectForm(!showArchitectForm)}
-                    className={`p-3 rounded-xl border text-left transition relative flex items-center justify-between cursor-pointer ${
-                      showArchitectForm
-                        ? 'bg-blue-50/60 border-blue-250 shadow-xs ring-1 ring-blue-255'
-                        : 'bg-slate-50/50 border-slate-200 hover:bg-slate-55 text-slate-650'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={`p-1.5 rounded-lg text-xs ${showArchitectForm ? 'bg-blue-100 text-blue-700 font-bold animate-pulse' : 'bg-slate-100 text-slate-500'}`}>🏢</span>
-                      <div>
-                        <span className="block text-xs font-bold font-sans text-slate-900 leading-none">Architect Specialist</span>
-                        <span className="text-[10px] text-slate-400 font-sans mt-0.5 block leading-none">Planning Profile</span>
-                      </div>
-                    </div>
-                    <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${showArchitectForm ? 'border-blue-500 bg-blue-500 text-white font-bold' : 'border-slate-300'}`}>
-                      {showArchitectForm && <span className="text-[9px] font-black leading-none">✓</span>}
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowBuilderForm(!showBuilderForm)}
-                    className={`p-3 rounded-xl border text-left transition relative flex items-center justify-between cursor-pointer ${
-                      showBuilderForm
-                        ? 'bg-amber-50/60 border-amber-250 shadow-xs ring-1 ring-amber-255'
-                        : 'bg-slate-50/50 border-slate-200 hover:bg-slate-55 text-slate-650'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={`p-1.5 rounded-lg text-xs ${showBuilderForm ? 'bg-amber-100 text-amber-700 font-bold animate-pulse' : 'bg-slate-100 text-slate-500'}`}>👷</span>
-                      <div>
-                        <span className="block text-xs font-bold font-sans text-slate-900 leading-none">Builder Partner</span>
-                        <span className="text-[10px] text-slate-400 font-sans mt-0.5 block leading-none">Construction Profile</span>
-                      </div>
-                    </div>
-                    <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${showBuilderForm ? 'border-amber-500 bg-amber-500 text-white font-bold' : 'border-slate-300'}`}>
-                      {showBuilderForm && <span className="text-[9px] font-black leading-none">✓</span>}
-                    </div>
-                  </button>
+                    <option value="None">None / No Partner</option>
+                    <option value="Interior Designer">🎨 Interior Designer</option>
+                    <option value="Carpenter Partner">🪚 Carpenter Partner</option>
+                    <option value="Architect Specialist">🏢 Architect Specialist</option>
+                    <option value="Builder Partner">👷 Builder Partner</option>
+                  </select>
+                  <span className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </span>
                 </div>
               </div>
 
@@ -1865,26 +1792,6 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
                     </option>
                   ))}
                 </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1.5 font-sans flex items-center gap-1">
-                <span>Next Follow-Up Date</span>
-                <span className="text-slate-400 font-normal italic lowercase">(optional)</span>
-              </label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                  <Calendar size={16} className="text-indigo-500" />
-                </span>
-                <input
-                  type="date"
-                  value={nextFollowUpDate}
-                  onChange={(e) => setNextFollowUpDate(e.target.value)}
-                  min={visitingDate}
-                  className="w-full pl-9 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 transition"
-                  id="inp-next-followup-date"
-                />
               </div>
             </div>
 

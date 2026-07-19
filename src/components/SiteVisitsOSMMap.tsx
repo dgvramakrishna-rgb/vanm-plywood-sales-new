@@ -222,6 +222,27 @@ function calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number
   return (brng + 360) % 360;
 }
 
+function MapFitBounds({ visits, userLocation }: { visits: SiteVisit[], userLocation: [number, number] | null }) {
+  const map = useMap();
+  const hasFitted = useRef(false);
+  
+  useEffect(() => {
+    if (hasFitted.current) return;
+    
+    const coords = [
+        ...visits
+          .filter(v => v.latitude !== null && v.longitude !== null)
+          .map(v => [v.latitude!, v.longitude!] as [number, number]),
+        ...(userLocation ? [userLocation] : [])
+    ];
+    if (coords.length > 0) {
+      map.fitBounds(coords, { padding: [50, 50] });
+      hasFitted.current = true;
+    }
+  }, [map, visits, userLocation]);
+  return null;
+}
+
 function MapController({ 
   center, 
   zoom, 
@@ -294,6 +315,7 @@ interface SiteVisitsOSMMapProps {
   visits: SiteVisit[];
   onEditVisit?: (visit: SiteVisit) => void;
   onCompleteVisit?: (visit: SiteVisit) => void;
+  onDeleteVisit?: (visit: SiteVisit) => void;
   onViewHistory?: (mobile: string) => void;
   onWhatsApp?: (mobile: string, name: string) => void;
 }
@@ -302,6 +324,7 @@ export default function SiteVisitsOSMMap({
   visits, 
   onEditVisit, 
   onCompleteVisit, 
+  onDeleteVisit,
   onViewHistory, 
   onWhatsApp
 }: SiteVisitsOSMMapProps) {
@@ -585,6 +608,7 @@ export default function SiteVisitsOSMMap({
             followMode={followMode}
             setFollowMode={setFollowMode}
           />
+          <MapFitBounds visits={visits} userLocation={userLocation} />
           <MapRotator heading={heading} autoRotate={autoRotate} />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -631,17 +655,7 @@ export default function SiteVisitsOSMMap({
             return (
               <React.Fragment key={visit.id}>
                 {isGeofenceEnabled && visit.latitude && visit.longitude && (
-                  <Circle
-                    center={[visit.latitude, visit.longitude]}
-                    radius={geofenceRadius}
-                    pathOptions={{
-                      fillColor: isInside ? '#10b981' : '#6366f1',
-                      fillOpacity: isInside ? 0.22 : 0.07,
-                      color: isInside ? '#10b981' : '#4f46e5',
-                      weight: isInside ? 2.5 : 1.2,
-                      dashArray: isInside ? undefined : '4, 4'
-                    }}
-                  />
+                  <></>
                 )}
                 <Marker 
                   position={[visit.latitude!, visit.longitude!]}
@@ -661,19 +675,19 @@ export default function SiteVisitsOSMMap({
                 }}
               >
                 <Popup className="custom-osm-popup">
-                  <div className="w-[280px] p-0.5 font-sans">
+                  <div className="w-[240px] p-0.5 font-sans max-h-[300px] overflow-y-auto">
                     {visit.photo && (
                       <div className="mb-2">
                         <SitePhotoItem 
                           visit={visit} 
                           onEnlarge={(photo) => setFullPhoto(photo)}
-                          className="relative w-full h-24 rounded-lg overflow-hidden shadow-inner cursor-zoom-in group bg-slate-50 border border-slate-100"
+                          className="relative w-full h-20 rounded-lg overflow-hidden shadow-inner cursor-zoom-in group bg-slate-50 border border-slate-100"
                           imageClassName="w-full h-full object-cover group-hover:scale-105 duration-200"
                         />
                       </div>
                     )}
 
-                    <div className="space-y-2">
+                    <div className="space-y-1">
                       {mapViewMode === 'carpenters' && (
                         <div className="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200">
                           <p className="text-[9px] font-black uppercase text-amber-800 tracking-wider font-mono">Associated Carpenter</p>
@@ -852,6 +866,13 @@ export default function SiteVisitsOSMMap({
                             <Navigation size={10} />
                             Navigate
                           </button>
+                          <button 
+                            onClick={() => onEditVisit?.(visit)}
+                            className="flex-1 bg-amber-500 text-white py-1.5 rounded text-[9px] font-bold hover:bg-amber-600 transition flex items-center justify-center gap-1"
+                          >
+                            <Edit2 size={10} />
+                            Edit
+                          </button>
                           <a 
                             href={`tel:${visit.clientMobile}`}
                             className="w-8 bg-slate-100 text-slate-700 flex items-center justify-center rounded hover:bg-slate-200 transition"
@@ -889,22 +910,46 @@ export default function SiteVisitsOSMMap({
                       </div>
                         
                       {visit.isCompleted ? (
-                        <div className="w-full py-1.5 bg-slate-100 text-slate-600 border border-slate-200 rounded text-[9px] font-black flex items-center justify-center gap-1.5">
-                          <CheckCircle size={12} className="text-emerald-500" />
-                          Completed Site
+                        <div className="flex gap-1.5 w-full">
+                          <div className="flex-1 py-1.5 bg-slate-100 text-slate-600 border border-slate-200 rounded text-[9px] font-black flex items-center justify-center gap-1.5">
+                            <CheckCircle size={12} className="text-emerald-500" />
+                            Completed
+                          </div>
+                          <button 
+                            onClick={() => {
+                              if (confirm('Delete this visit?')) {
+                                onDeleteVisit?.(visit);
+                              }
+                            }}
+                            className="py-1.5 px-3 bg-rose-50 text-rose-700 border border-rose-100 rounded text-[9px] font-black flex items-center justify-center gap-1.5 hover:bg-rose-100 transition"
+                          >
+                            <X size={12} />
+                          </button>
                         </div>
                       ) : (
-                        <button 
-                          onClick={() => {
-                            if (confirm('Mark this visit as completed?')) {
-                              onCompleteVisit?.(visit);
-                            }
-                          }}
-                          className="w-full py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded text-[9px] font-black flex items-center justify-center gap-1.5 hover:bg-emerald-100 transition"
-                        >
-                          <CheckCircle size={12} />
-                          Mark Completed
-                        </button>
+                        <div className="flex gap-1.5 w-full">
+                          <button 
+                            onClick={() => {
+                              if (confirm('Mark this visit as completed?')) {
+                                onCompleteVisit?.(visit);
+                              }
+                            }}
+                            className="flex-1 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded text-[9px] font-black flex items-center justify-center gap-1.5 hover:bg-emerald-100 transition"
+                          >
+                            <CheckCircle size={12} />
+                            Complete
+                          </button>
+                          <button 
+                            onClick={() => {
+                              if (confirm('Delete this visit?')) {
+                                onDeleteVisit?.(visit);
+                              }
+                            }}
+                            className="py-1.5 px-3 bg-rose-50 text-rose-700 border border-rose-100 rounded text-[9px] font-black flex items-center justify-center gap-1.5 hover:bg-rose-100 transition"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -929,7 +974,7 @@ export default function SiteVisitsOSMMap({
           });
 
           return (
-            <div className="absolute top-4 left-4 z-[1000] flex flex-col items-start gap-2 max-w-[280px] sm:max-w-[320px]">
+            <div className="hidden absolute top-4 left-4 z-[1000] flex flex-col items-start gap-2 max-w-[280px] sm:max-w-[320px]">
               {!isSettingsExpanded ? (
                 <button
                   onClick={() => setIsSettingsExpanded(true)}
@@ -952,7 +997,7 @@ export default function SiteVisitsOSMMap({
                         <Radio size={14} className={isGeofenceEnabled ? 'animate-pulse' : ''} />
                       </div>
                       <div>
-                        <h3 className="text-xs font-black tracking-tight text-white uppercase font-mono">Geofencing Radar</h3>
+                        <h3 className="text-xs font-black tracking-tight text-white uppercase font-mono">Geofencing</h3>
                         <p className="text-[9px] text-slate-400 font-medium">OSM boundary analysis</p>
                       </div>
                     </div>
@@ -1129,7 +1174,7 @@ export default function SiteVisitsOSMMap({
             }`}
             title={autoRotate ? "Lock North Up" : "Enable Auto-Rotate Heading"}
           >
-            <div style={{ transform: `rotate(${autoRotate ? heading : 0}deg)`, transition: 'transform 0.3s ease-out' }}>
+            <div style={{ transform: `rotate(${autoRotate ? heading : 0}deg)`, transition: 'transform 1s ease-out' }}>
               <Compass size={18} className={autoRotate ? 'text-indigo-600' : 'text-slate-400 group-hover:text-indigo-600'} />
             </div>
             <div className="absolute -left-20 bg-slate-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap z-[2000]">
@@ -1259,9 +1304,10 @@ export default function SiteVisitsOSMMap({
           <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 p-4 animate-fade-in backdrop-blur-md">
             <button 
               onClick={() => setFullPhoto(null)}
-              className="absolute top-6 right-6 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition"
+              className="absolute top-6 left-6 p-2 bg-black/50 hover:bg-black/70 rounded-lg text-white transition flex items-center gap-2 px-4 border border-white/20"
             >
-              <X size={24} />
+              <X size={20} />
+              <span className="font-bold text-sm">Back</span>
             </button>
             <div className="relative max-w-4xl max-h-[90vh] w-full flex items-center justify-center">
               <img 
@@ -1274,52 +1320,7 @@ export default function SiteVisitsOSMMap({
           </div>
         )}
 
-        {/* Legend Overlay */}
-        <div className="absolute bottom-6 left-4 bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-xl z-[1000] space-y-2 max-w-[145px]">
-          <>
-            <p className="text-[9px] font-black uppercase text-slate-400 font-mono tracking-widest mb-1">Site Types (OSM)</p>
-            <div className="grid grid-cols-1 gap-1.5">
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-[#a855f7] shadow-sm border border-[#7e22ce]"></div>
-                <span className="text-[9px] font-bold text-slate-700">Villa</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-[#fcd34d] shadow-sm border border-[#b45309]"></div>
-                <span className="text-[9px] font-bold text-slate-700">Duplex</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-[#10b981] shadow-sm border border-[#047857]"></div>
-                <span className="text-[9px] font-bold text-slate-700">Apartment</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-[#3b82f6] shadow-sm border border-[#1d4ed8]"></div>
-                <span className="text-[9px] font-bold text-slate-700">Home</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-[#f97316] shadow-sm border border-[#c2410c]"></div>
-                <span className="text-[9px] font-bold text-slate-700">Shop</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-[#ef4444] shadow-sm border border-[#991b1b]"></div>
-                <span className="text-[9px] font-bold text-slate-700">Client Absent</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm border border-[#047857]"></div>
-                <span className="text-[9px] font-bold text-slate-700">Completed</span>
-              </div>
-            </div>
-          </>
-          <div className="mt-2 pt-2 border-t border-slate-100 space-y-1.5">
-            <div className="flex items-center gap-2">
-              <div className="w-2.5 h-2.5 rounded-full bg-slate-900 shadow-sm border border-white"></div>
-              <span className="text-[9px] font-bold text-slate-700">You</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-2.5 h-2.5 bg-indigo-500/10 border border-indigo-500/30 rounded-sm"></div>
-              <span className="text-[9px] font-bold text-slate-700">5km Zone</span>
-            </div>
-          </div>
-        </div>
+
       </div>
     </div>
   );
