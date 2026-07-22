@@ -184,6 +184,7 @@ export interface ExecutiveUser {
   mobile: string;
   zone: string;
   companyName?: string;
+  passkey?: string;
   createdAt?: string;
 }
 
