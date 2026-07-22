@@ -130,7 +130,7 @@ export default function Dashboard({
   // Navigation tab state within the Home Page: overview, followups, reports, absent, places, dealers, completed, partners, call
   const [activeHomeTab, setActiveHomeTab] = useState<'overview' | 'followups' | 'reports' | 'absent' | 'places' | 'dealers' | 'completed' | 'partners' | 'map' | 'call'>('overview');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [mapType, setMapType] = useState<'google' | 'osm'>('osm');
+  const [mapType, setMapType] = useState<'google' | 'osm'>('google');
   
   const unsyncedCount = visits.filter(v => v.synced !== true).length;
 
@@ -2021,6 +2021,32 @@ Report generated locally from zone sync.`;
               </div>
               
               <div className="flex flex-wrap items-center gap-2">
+                {/* Map Type Selector */}
+                <div className="flex items-center gap-1 p-1 bg-white/10 rounded-xl border border-white/20">
+                  <button
+                    type="button"
+                    onClick={() => setMapType('google')}
+                    className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer ${
+                      mapType === 'google'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    <span>🗺️</span> Google Maps
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMapType('osm')}
+                    className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer ${
+                      mapType === 'osm'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    <span>🌍</span> OpenStreetMap
+                  </button>
+                </div>
+
                 <div className="flex items-center gap-2 p-1 bg-white/10 rounded-xl border border-white/20 mr-2">
                   <button
                     onClick={() => {
@@ -2050,17 +2076,31 @@ Report generated locally from zone sync.`;
             </div>
             
             <div className="relative h-[650px] w-full">
-              <SiteVisitsOSMMap 
-                visits={visits} 
-                onEditVisit={onEditVisit}
-                onCompleteVisit={async (visit) => {
-                  if (onToggleCompleteCustomer) {
-                    await onToggleCompleteCustomer(visit.clientMobile, true);
-                  }
-                }}
-                onWhatsApp={handleMapWhatsApp}
-                onViewHistory={handleMapViewHistory}
-              />
+              {mapType === 'google' ? (
+                <SiteVisitsMap 
+                  visits={visits} 
+                  onEditVisit={onEditVisit}
+                  onCompleteVisit={async (visit) => {
+                    if (onToggleCompleteCustomer) {
+                      await onToggleCompleteCustomer(visit.clientMobile, true);
+                    }
+                  }}
+                  onWhatsApp={handleMapWhatsApp}
+                  onViewHistory={handleMapViewHistory}
+                />
+              ) : (
+                <SiteVisitsOSMMap 
+                  visits={visits} 
+                  onEditVisit={onEditVisit}
+                  onCompleteVisit={async (visit) => {
+                    if (onToggleCompleteCustomer) {
+                      await onToggleCompleteCustomer(visit.clientMobile, true);
+                    }
+                  }}
+                  onWhatsApp={handleMapWhatsApp}
+                  onViewHistory={handleMapViewHistory}
+                />
+              )}
             </div>
           </div>
         </div>

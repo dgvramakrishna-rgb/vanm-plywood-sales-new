@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { APIProvider, Map, AdvancedMarker, Pin, useMap, useMapsLibrary, InfoWindow } from '@vis.gl/react-google-maps';
-import { Navigation, MapPin, Info, Crosshair, Phone, Calendar, User, Home, CheckCircle, Edit2, Maximize2, X, MessageCircle, History } from 'lucide-react';
+import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
+import { Navigation, MapPin, Phone, Calendar, User, Home, CheckCircle, Edit2, X, MessageCircle, History, Crosshair } from 'lucide-react';
 import { SiteVisit } from '../types';
 import { SitePhotoItem } from './SitePhotoItem';
 
@@ -8,41 +8,9 @@ const API_KEY =
   process.env.GOOGLE_MAPS_PLATFORM_KEY ||
   (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY ||
   (globalThis as any).GOOGLE_MAPS_PLATFORM_KEY ||
-  '';
+  'AIzaSyAuc9SjTV5c7XMt7_AQHWW_jd2VVrEC5a4';
 
 const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY' && API_KEY.trim().length > 10;
-
-// Helper component to render a circle on the map
-function MapCircle({ center, radius, options }: { center: google.maps.LatLngLiteral, radius: number, options?: google.maps.CircleOptions }) {
-  const map = useMap();
-  const circleRef = useRef<google.maps.Circle | null>(null);
-
-  useEffect(() => {
-    if (!map) return;
-
-    if (!circleRef.current) {
-      circleRef.current = new google.maps.Circle({
-        map,
-        center,
-        radius,
-        ...options
-      });
-    } else {
-      circleRef.current.setCenter(center);
-      circleRef.current.setRadius(radius);
-      if (options) circleRef.current.setOptions(options);
-    }
-
-    return () => {
-      if (circleRef.current) {
-        circleRef.current.setMap(null);
-        circleRef.current = null;
-      }
-    };
-  }, [map, center, radius, options]);
-
-  return null;
-}
 
 interface SiteVisitsMapProps {
   visits: SiteVisit[];
@@ -53,17 +21,144 @@ interface SiteVisitsMapProps {
 }
 
 export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit, onViewHistory, onWhatsApp }: SiteVisitsMapProps) {
-  const [userLocation, setUserLocation] = useState<google.maps.LatLngLiteral | null>(null);
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<google.maps.Map | null>(null);
+  const markersRef = useRef<google.maps.Marker[]>([]);
+  const userMarkerRef = useRef<google.maps.Marker | null>(null);
+  const circleRef = useRef<google.maps.Circle | null>(null);
+
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isLocating, setIsLocating] = useState(false);
-  const [mapCenter, setMapCenter] = useState<google.maps.LatLngLiteral>({ lat: 20.5937, lng: 78.9629 }); // Default center of India
+  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>({ lat: 20.5937, lng: 78.9629 });
   const [zoom, setZoom] = useState(5);
   const [selectedVisit, setSelectedVisit] = useState<SiteVisit | null>(null);
   const [fullPhoto, setFullPhoto] = useState<string | null>(null);
   const [mapViewMode, setMapViewMode] = useState<'clients' | 'carpenters'>('clients');
+  const [isMapLoaded, setIsMapLoaded] = useState(false);
 
+  // Initialize Google Maps API
   useEffect(() => {
-    handleDetectLocation();
+    if (!hasValidKey || !mapRef.current) return;
+
+    setOptions({
+      key: API_KEY,
+      v: 'weekly',
+    });
+
+    importLibrary('maps').then(({ Map }) => {
+      if (!mapRef.current) return;
+
+      const map = new Map(mapRef.current, {
+        center: mapCenter,
+        zoom: zoom,
+        gestureHandling: 'greedy',
+        zoomControl: true,
+        streetViewControl: false,
+        mapTypeControl: false,
+        fullscreenControl: false,
+      });
+
+      mapInstanceRef.current = map;
+      setIsMapLoaded(true);
+
+      // Auto detect user location
+      handleDetectLocation();
+    }).catch(err => {
+      console.error('Failed to load Google Maps:', err);
+    });
   }, []);
+
+  // Center map on center update
+  useEffect(() => {
+    if (mapInstanceRef.current && isMapLoaded) {
+      mapInstanceRef.current.setCenter(mapCenter);
+      mapInstanceRef.current.setZoom(zoom);
+    }
+  }, [mapCenter, zoom, isMapLoaded]);
+
+  // Handle user location marker & 5km circle
+  useEffect(() => {
+    if (!mapInstanceRef.current || !isMapLoaded || !window.google) return;
+
+    if (userLocation) {
+      if (!userMarkerRef.current) {
+        userMarkerRef.current = new google.maps.Marker({
+          position: userLocation,
+          map: mapInstanceRef.current,
+          title: 'Your Location',
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: '#2563eb',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 3,
+          }
+        });
+      } else {
+        userMarkerRef.current.setPosition(userLocation);
+      }
+
+      if (!circleRef.current) {
+        circleRef.current = new google.maps.Circle({
+          map: mapInstanceRef.current,
+          center: userLocation,
+          radius: 5000,
+          fillColor: '#6366f1',
+          fillOpacity: 0.1,
+          strokeColor: '#4f46e5',
+          strokeOpacity: 0.3,
+          strokeWeight: 1,
+          clickable: false
+        });
+      } else {
+        circleRef.current.setCenter(userLocation);
+      }
+    }
+  }, [userLocation, isMapLoaded]);
+
+  // Handle site markers update
+  useEffect(() => {
+    if (!mapInstanceRef.current || !isMapLoaded || !window.google) return;
+
+    // Clear existing markers
+    markersRef.current.forEach(m => m.setMap(null));
+    markersRef.current = [];
+
+    const carpentersVisits = visits.filter(v => 
+      (v.carpenterName && v.carpenterName.trim().length > 0) || 
+      (v.contractorType === 'carpenter' && v.contractorName && v.contractorName.trim().length > 0)
+    );
+
+    const visitsToMap = mapViewMode === 'clients' ? visits : carpentersVisits;
+    const visitsWithCoords = visitsToMap.filter(v => v.latitude && v.longitude);
+
+    visitsWithCoords.forEach((visit) => {
+      const isCarpMode = mapViewMode === 'carpenters';
+      const color = getMarkerColor(visit);
+
+      const marker = new google.maps.Marker({
+        position: { lat: visit.latitude!, lng: visit.longitude! },
+        map: mapInstanceRef.current,
+        title: visit.clientName,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
+          fillColor: isCarpMode ? '#f59e0b' : color.bg,
+          fillOpacity: 0.95,
+          strokeColor: isCarpMode ? '#b45309' : color.border,
+          strokeWeight: 3,
+        }
+      });
+
+      marker.addListener('click', () => {
+        setSelectedVisit(visit);
+      });
+
+      markersRef.current.push(marker);
+    });
+
+  }, [visits, mapViewMode, isMapLoaded]);
 
   const handleDetectLocation = () => {
     setIsLocating(true);
@@ -82,19 +177,13 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit, on
         (error) => {
           console.warn("Geolocation warning:", error.message);
           setIsLocating(false);
-          
-          // Fallback logic: center on first visit with coords if available
           const firstWithCoords = visits.find(v => v.latitude && v.longitude);
           if (firstWithCoords) {
             setMapCenter({ lat: firstWithCoords.latitude!, lng: firstWithCoords.longitude! });
             setZoom(11);
           }
         },
-        { 
-          enableHighAccuracy: true, 
-          timeout: 15000, 
-          maximumAge: 60000 // 1 minute cache
-        }
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
       );
     } else {
       setIsLocating(false);
@@ -110,21 +199,21 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit, on
 
   const getMarkerColor = (visit: SiteVisit) => {
     if (visit.customerNotAvailable) {
-      return { bg: '#ef4444', border: '#991b1b' }; // Red for absent
+      return { bg: '#ef4444', border: '#991b1b' };
     }
     
     const type = visit.buildingType?.toLowerCase();
     switch (type) {
       case 'villas':
-        return { bg: '#a855f7', border: '#7e22ce' }; // Purple for Villas
+        return { bg: '#a855f7', border: '#7e22ce' };
       case 'duplex':
-        return { bg: '#f59e0b', border: '#b45309' }; // Yellow
+        return { bg: '#f59e0b', border: '#b45309' };
       case 'apartment':
-        return { bg: '#10b981', border: '#047857' }; // Green
+        return { bg: '#10b981', border: '#047857' };
       case 'home':
-        return { bg: '#3b82f6', border: '#1d4ed8' }; // Blue
+        return { bg: '#3b82f6', border: '#1d4ed8' };
       case 'shop':
-        return { bg: '#f97316', border: '#c2410c' }; // Orange
+        return { bg: '#f97316', border: '#c2410c' };
       default:
         return { 
           bg: visit.leadStatus === 'hot' ? '#ef4444' : '#4f46e5', 
@@ -143,15 +232,6 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit, on
         <p className="text-sm text-slate-500 max-w-md mb-6">
           To view client sites on a live map, please configure your <code>GOOGLE_MAPS_PLATFORM_KEY</code> in the app settings.
         </p>
-        <div className="bg-white p-4 rounded-xl border border-slate-200 text-left w-full max-w-sm">
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Setup Instructions:</p>
-          <ol className="text-xs text-slate-600 space-y-2 list-decimal pl-4">
-            <li>Open <strong>Settings</strong> (⚙️ icon)</li>
-            <li>Go to <strong>Secrets</strong></li>
-            <li>Add <code>GOOGLE_MAPS_PLATFORM_KEY</code></li>
-            <li>Paste your key and save</li>
-          </ol>
-        </div>
       </div>
     );
   }
@@ -164,6 +244,11 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit, on
   const visitsToMap = mapViewMode === 'clients' ? visits : carpentersVisits;
   const visitsWithCoords = visitsToMap.filter(v => v.latitude && v.longitude);
 
+  const carpName = selectedVisit ? (selectedVisit.carpenterName || (selectedVisit.contractorType === 'carpenter' ? selectedVisit.contractorName : '') || 'No Carpenter') : '';
+  const carpMobile = selectedVisit ? (selectedVisit.carpenterMobile || (selectedVisit.contractorType === 'carpenter' ? selectedVisit.contractorMobile : '') || '') : '';
+  const carpPlace = selectedVisit ? (selectedVisit.carpenterPlace || (selectedVisit.contractorType === 'carpenter' ? selectedVisit.contractorAddress : '') || 'N/A') : '';
+  const isCarpMode = mapViewMode === 'carpenters';
+
   return (
     <div className="flex flex-col h-full bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
       <div className="bg-slate-50/80 px-4 py-3 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -175,7 +260,6 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit, on
             </span>
           </div>
 
-          {/* Map View Mode Segmented Controls */}
           <div className="flex bg-slate-200/80 p-0.5 rounded-xl border border-slate-300/40">
             <button
               type="button"
@@ -216,283 +300,216 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit, on
       </div>
 
       <div className="flex-1 relative min-h-[500px]">
-        <APIProvider apiKey={API_KEY} version="weekly">
-          <Map
-            defaultCenter={mapCenter}
-            defaultZoom={zoom}
-            mapId="SITE_VISITS_MAP"
-            gestureHandling="greedy"
-            disableDefaultUI={false}
-            zoomControl={true}
-            internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-            style={{ width: '100%', height: '100%' }}
-          >
-            {/* User current location marker */}
-            {userLocation && (
-              <AdvancedMarker position={userLocation} title="Your Location">
-                <div className="relative flex items-center justify-center">
-                   <div className="absolute w-8 h-8 bg-blue-500/20 rounded-full animate-ping"></div>
-                   <div className="w-4 h-4 bg-blue-600 rounded-full border-2 border-white shadow-md z-10"></div>
+        {/* Google Map Container */}
+        <div ref={mapRef} className="w-full h-full min-h-[500px]" />
+
+        {/* Custom Info Popup Card */}
+        {selectedVisit && (
+          <div className="absolute top-4 right-4 z-20 w-[320px] bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-2xl border border-slate-200 animate-fade-in font-sans">
+            <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className={`w-2.5 h-2.5 rounded-full ${isCarpMode ? 'bg-amber-500' : (getMarkerColor(selectedVisit).bg === '#ef4444' ? 'bg-rose-500' : 'bg-indigo-600')}`}></div>
+                <span className="text-xs font-black uppercase text-slate-700 font-mono tracking-tight">
+                  {isCarpMode ? 'Carpenter & Client Details' : 'Visit Details'}
+                </span>
+              </div>
+              <button 
+                onClick={() => setSelectedVisit(null)} 
+                className="p-1 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {selectedVisit.photo && (
+              <div className="mb-3">
+                <SitePhotoItem 
+                  visit={selectedVisit} 
+                  onEnlarge={(photo) => setFullPhoto(photo)}
+                  className="relative w-full h-32 rounded-xl overflow-hidden shadow-inner cursor-zoom-in group bg-slate-50 border border-slate-100"
+                  imageClassName="w-full h-full object-cover group-hover:scale-105 duration-200"
+                />
+              </div>
+            )}
+
+            <div className="space-y-2.5">
+              {isCarpMode && (
+                <div className="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200">
+                  <p className="text-[9px] font-black uppercase text-amber-800 tracking-wider font-mono">Associated Carpenter</p>
+                  <h4 className="text-xs font-black text-slate-900 m-0 leading-tight flex items-center gap-1.5 mt-0.5">
+                    <span>🪚</span> {carpName}
+                  </h4>
+                  {carpPlace && (
+                    <p className="text-[8px] text-slate-500 font-medium m-0 mt-0.5">Base: {carpPlace}</p>
+                  )}
                 </div>
-              </AdvancedMarker>
-            )}
+              )}
 
-            {/* 5km Radius Circle around user */}
-            {userLocation && (
-              <MapCircle 
-                center={userLocation} 
-                radius={5000} 
-                options={{
-                  fillColor: '#6366f1',
-                  fillOpacity: 0.1,
-                  strokeColor: '#4f46e5',
-                  strokeOpacity: 0.3,
-                  strokeWeight: 1,
-                  clickable: false
-                }}
-              />
-            )}
-
-            {/* Site markers */}
-            {visitsWithCoords.map((visit) => {
-              const carpName = visit.carpenterName || (visit.contractorType === 'carpenter' ? visit.contractorName : '') || 'No Carpenter';
-              const isCarpMode = mapViewMode === 'carpenters';
-
-              return (
-                <AdvancedMarker 
-                  key={visit.id} 
-                  position={{ lat: visit.latitude!, lng: visit.longitude! }}
-                  onClick={() => setSelectedVisit(visit)}
-                >
-                  <div className="group relative cursor-pointer">
-                    <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-white px-2 py-1 rounded shadow-lg border border-slate-200 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
-                      <p className="text-[10px] font-bold text-slate-900">
-                        {isCarpMode ? `🪚 ${carpName}` : visit.clientName}
-                      </p>
-                      <p className="text-[8px] text-slate-500">
-                        {isCarpMode ? `Client: ${visit.clientName}` : visit.location}
-                      </p>
-                    </div>
-                    <Pin 
-                      background={isCarpMode ? '#f59e0b' : getMarkerColor(visit).bg} 
-                      glyph={isCarpMode ? '🪚' : undefined}
-                      glyphColor="#ffffff" 
-                      borderColor={isCarpMode ? '#b45309' : getMarkerColor(visit).border}
-                      scale={0.9} 
-                    />
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider font-mono">Client Details</p>
+                  <h3 className="text-sm font-black text-slate-900 flex items-center gap-1.5 leading-tight mt-0.5">
+                    {selectedVisit.clientName}
+                  </h3>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <MapPin size={10} className="text-slate-400" />
+                    <p className="text-[10px] text-slate-500 font-medium">{selectedVisit.address || selectedVisit.location}</p>
                   </div>
-                </AdvancedMarker>
-              );
-            })}
+                </div>
+                <button 
+                  onClick={() => onEditVisit?.(selectedVisit)}
+                  className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition shrink-0 cursor-pointer"
+                  title="Edit Visit"
+                >
+                  <Edit2 size={12} />
+                </button>
+              </div>
 
-            {/* Info Window for selected visit */}
-            {selectedVisit && (() => {
-              const carpName = selectedVisit.carpenterName || (selectedVisit.contractorType === 'carpenter' ? selectedVisit.contractorName : '') || 'No Carpenter';
-              const carpMobile = selectedVisit.carpenterMobile || (selectedVisit.contractorType === 'carpenter' ? selectedVisit.contractorMobile : '') || '';
-              const carpPlace = selectedVisit.carpenterPlace || (selectedVisit.contractorType === 'carpenter' ? selectedVisit.contractorAddress : '') || 'N/A';
-              const isCarpMode = mapViewMode === 'carpenters';
+              <div className="grid grid-cols-2 gap-2 py-2 border-y border-slate-100">
+                <div className="space-y-0.5">
+                  <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Building Type</p>
+                  <div className="flex items-center gap-1">
+                    <Home size={10} className="text-indigo-500" />
+                    <span className="text-[10px] font-bold text-slate-700">{selectedVisit.buildingType || 'N/A'}</span>
+                  </div>
+                </div>
+                <div className="space-y-0.5 text-right">
+                  <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Contact No.</p>
+                  <div className="flex items-center justify-end gap-1">
+                    <Phone size={10} className="text-emerald-500" />
+                    <span className="text-[10px] font-bold text-slate-700">{selectedVisit.clientMobile || 'N/A'}</span>
+                  </div>
+                </div>
+              </div>
 
-              return (
-                <InfoWindow
-                  position={{ lat: selectedVisit.latitude!, lng: selectedVisit.longitude! }}
-                  onCloseClick={() => setSelectedVisit(null)}
-                  headerContent={
-                    <div className="flex items-center gap-2 pr-4">
-                      <div className={`w-2 h-2 rounded-full ${isCarpMode ? 'bg-amber-500' : (getMarkerColor(selectedVisit).bg === '#ef4444' ? 'bg-rose-500' : 'bg-indigo-600')}`}></div>
-                      <span className="text-xs font-black uppercase text-slate-500 font-mono tracking-tight">
-                        {isCarpMode ? 'Carpenter & Client Details' : 'Visit Details'}
-                      </span>
-                    </div>
+              {isCarpMode && carpMobile && (
+                <div className="p-2 rounded-lg bg-orange-50 border border-orange-100 flex items-center justify-between gap-1.5">
+                  <div className="min-w-0">
+                    <p className="text-[8px] font-extrabold uppercase text-orange-700 tracking-wider">Carpenter Mobile</p>
+                    <p className="text-[9px] font-bold text-slate-800 font-mono m-0">{carpMobile}</p>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <a 
+                      href={`tel:${carpMobile}`}
+                      className="p-1.5 bg-white text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-100 transition shadow-xs"
+                      title="Call Carpenter"
+                    >
+                      <Phone size={10} />
+                    </a>
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        const cleanPhone = carpMobile.replace(/\D/g, '').length === 10 ? '91' + carpMobile.replace(/\D/g, '') : carpMobile.replace(/\D/g, '');
+                        const text = encodeURIComponent(`Hello ${carpName} garu, this is regarding the ${selectedVisit.buildingType || 'site'} woodwork at ${selectedVisit.clientName}'s site.`);
+                        window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
+                      }}
+                      className="p-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition shadow-xs cursor-pointer"
+                      title="WhatsApp Carpenter"
+                    >
+                      <MessageCircle size={10} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Calendar size={10} className="text-slate-400" />
+                    <span className="text-[10px] text-slate-600 font-bold">{selectedVisit.visitingDate}</span>
+                  </div>
+                  <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase ${
+                    selectedVisit.leadStatus === 'hot' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700'
+                  }`}>
+                    {selectedVisit.leadStatus} Lead
+                  </span>
+                </div>
+                {selectedVisit.customerNotAvailable && (
+                  <div className="flex items-center gap-1.5 bg-rose-50 px-2 py-1 rounded border border-rose-100 mt-1">
+                    <User size={10} className="text-rose-500" />
+                    <span className="text-[9px] font-bold text-rose-700">Customer was absent</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2 pt-1">
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => handleNavigate(selectedVisit)}
+                    className="flex-1 bg-indigo-600 text-white py-1.5 rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition flex items-center justify-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
+                  >
+                    <Navigation size={12} />
+                    Navigate
+                  </button>
+                  <a 
+                    href={`tel:${selectedVisit.clientMobile}`}
+                    className="w-10 bg-slate-100 text-slate-700 flex items-center justify-center rounded-lg hover:bg-slate-200 transition"
+                  >
+                    <Phone size={14} />
+                  </a>
+                </div>
+
+                <div className="flex gap-2">
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      if (onWhatsApp) {
+                        onWhatsApp(selectedVisit.clientMobile, selectedVisit.clientName);
+                      } else {
+                        const mobile = selectedVisit.clientMobile || '';
+                        const cleanPhone = mobile.replace(/\D/g, '').length === 10 ? '91' + mobile.replace(/\D/g, '') : mobile.replace(/\D/g, '');
+                        const text = encodeURIComponent(`Hello ${selectedVisit.clientName} garu, I recently visited your site, work progress is good 👍. Thank you sir.`);
+                        window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
+                      }
+                    }}
+                    className="flex-1 bg-emerald-600 text-white py-1.5 rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <MessageCircle size={12} />
+                    WhatsApp Client
+                  </button>
+                  <button 
+                    onClick={() => onViewHistory?.(selectedVisit.clientMobile)}
+                    className="flex-1 bg-indigo-50 text-indigo-700 py-1.5 rounded-lg text-[10px] font-bold border border-indigo-100 hover:bg-indigo-100 transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <History size={12} />
+                    Visit Log
+                  </button>
+                </div>
+              </div>
+                
+              <button 
+                onClick={() => {
+                  if (confirm('Mark this visit as completed and remove from active list?')) {
+                    onCompleteVisit?.(selectedVisit);
+                    setSelectedVisit(null);
                   }
-                >
-                  <div className="w-[300px] p-1 font-sans">
-                    {selectedVisit.photo && (
-                      <div className="mb-3">
-                        <SitePhotoItem 
-                          visit={selectedVisit} 
-                          onEnlarge={(photo) => setFullPhoto(photo)}
-                          className="relative w-full h-32 rounded-xl overflow-hidden shadow-inner cursor-zoom-in group bg-slate-50 border border-slate-100"
-                          imageClassName="w-full h-full object-cover group-hover:scale-105 duration-200"
-                        />
-                      </div>
-                    )}
-
-                    <div className="space-y-2.5">
-                      {isCarpMode ? (
-                        <div className="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200">
-                          <p className="text-[9px] font-black uppercase text-amber-800 tracking-wider font-mono">Associated Carpenter</p>
-                          <h4 className="text-xs font-black text-slate-900 m-0 leading-tight flex items-center gap-1.5 mt-0.5">
-                            <span>🪚</span> {carpName}
-                          </h4>
-                          {carpPlace && (
-                            <p className="text-[8px] text-slate-500 font-medium m-0 mt-0.5">Base: {carpPlace}</p>
-                          )}
-                        </div>
-                      ) : null}
-
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider font-mono">Client Details</p>
-                          <h3 className="text-sm font-black text-slate-900 flex items-center gap-1.5 leading-tight mt-0.5">
-                            {selectedVisit.clientName}
-                          </h3>
-                          <div className="flex items-center gap-1 mt-0.5">
-                            <MapPin size={10} className="text-slate-400" />
-                            <p className="text-[10px] text-slate-500 font-medium">{selectedVisit.address || selectedVisit.location}</p>
-                          </div>
-                        </div>
-                        <button 
-                          onClick={() => onEditVisit?.(selectedVisit)}
-                          className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition shrink-0"
-                          title="Edit Visit"
-                        >
-                          <Edit2 size={12} />
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 py-2 border-y border-slate-100">
-                        <div className="space-y-0.5">
-                          <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Building Type</p>
-                          <div className="flex items-center gap-1">
-                            <Home size={10} className="text-indigo-500" />
-                            <span className="text-[10px] font-bold text-slate-700">{selectedVisit.buildingType || 'N/A'}</span>
-                          </div>
-                        </div>
-                        <div className="space-y-0.5 text-right">
-                          <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Contact No.</p>
-                          <div className="flex items-center justify-end gap-1">
-                            <Phone size={10} className="text-emerald-500" />
-                            <span className="text-[10px] font-bold text-slate-700">{selectedVisit.clientMobile || 'N/A'}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Carpenter Action Panel in Carpenters view */}
-                      {isCarpMode && carpMobile && (
-                        <div className="p-2 rounded-lg bg-orange-50 border border-orange-100 flex items-center justify-between gap-1.5">
-                          <div className="min-w-0">
-                            <p className="text-[8px] font-extrabold uppercase text-orange-700 tracking-wider">Carpenter Mobile</p>
-                            <p className="text-[9px] font-bold text-slate-800 font-mono m-0">{carpMobile}</p>
-                          </div>
-                          <div className="flex gap-1.5">
-                            <a 
-                              href={`tel:${carpMobile}`}
-                              className="p-1.5 bg-white text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-100 transition shadow-xs"
-                              title="Call Carpenter"
-                            >
-                              <Phone size={10} />
-                            </a>
-                            <button 
-                              type="button"
-                              onClick={() => {
-                                const cleanPhone = carpMobile.replace(/\D/g, '').length === 10 ? '91' + carpMobile.replace(/\D/g, '') : carpMobile.replace(/\D/g, '');
-                                const text = encodeURIComponent(`Hello ${carpName} garu, this is regarding the ${selectedVisit.buildingType || 'site'} woodwork at ${selectedVisit.clientName}'s site.`);
-                                window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
-                              }}
-                              className="p-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition shadow-xs"
-                              title="WhatsApp Carpenter"
-                            >
-                              <MessageCircle size={10} />
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
-                            <Calendar size={10} className="text-slate-400" />
-                            <span className="text-[10px] text-slate-600 font-bold">{selectedVisit.visitingDate}</span>
-                          </div>
-                          <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase ${
-                            selectedVisit.leadStatus === 'hot' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700'
-                          }`}>
-                            {selectedVisit.leadStatus} Lead
-                          </span>
-                        </div>
-                        {selectedVisit.customerNotAvailable && (
-                          <div className="flex items-center gap-1.5 bg-rose-50 px-2 py-1 rounded border border-rose-100 mt-1">
-                            <User size={10} className="text-rose-500" />
-                            <span className="text-[9px] font-bold text-rose-700">Customer was absent</span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex flex-col gap-2 pt-1">
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={() => handleNavigate(selectedVisit)}
-                            className="flex-1 bg-indigo-600 text-white py-1.5 rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                          >
-                            <Navigation size={12} />
-                            Navigate
-                          </button>
-                          <a 
-                            href={`tel:${selectedVisit.clientMobile}`}
-                            className="w-10 bg-slate-100 text-slate-700 flex items-center justify-center rounded-lg hover:bg-slate-200 transition"
-                          >
-                            <Phone size={14} />
-                          </a>
-                        </div>
-
-                        <div className="flex gap-2">
-                          <button 
-                            type="button"
-                            onClick={() => {
-                              if (onWhatsApp) {
-                                onWhatsApp(selectedVisit.clientMobile, selectedVisit.clientName);
-                              } else {
-                                const mobile = selectedVisit.clientMobile || '';
-                                const cleanPhone = mobile.replace(/\D/g, '').length === 10 ? '91' + mobile.replace(/\D/g, '') : mobile.replace(/\D/g, '');
-                                const text = encodeURIComponent(`Hello ${selectedVisit.clientName} garu, I recently visited your site, work progress is good 👍. Thank you sir.`);
-                                window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
-                              }
-                            }}
-                            className="flex-1 bg-emerald-600 text-white py-1.5 rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition flex items-center justify-center gap-1.5 shadow-sm"
-                          >
-                            <MessageCircle size={12} />
-                            WhatsApp Client
-                          </button>
-                          <button 
-                            onClick={() => onViewHistory?.(selectedVisit.clientMobile)}
-                            className="flex-1 bg-indigo-50 text-indigo-700 py-1.5 rounded-lg text-[10px] font-bold border border-indigo-100 hover:bg-indigo-100 transition flex items-center justify-center gap-1.5 shadow-sm"
-                          >
-                            <History size={12} />
-                            Visit Log
-                          </button>
-                        </div>
-                      </div>
-                        
-                      <button 
-                        onClick={() => {
-                          if (confirm('Mark this visit as completed and remove from active list?')) {
-                            onCompleteVisit?.(selectedVisit);
-                            setSelectedVisit(null);
-                          }
-                        }}
-                        className="w-full py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-lg text-[10px] font-extrabold flex items-center justify-center gap-2 hover:bg-emerald-100 transition shadow-sm"
-                      >
-                        <CheckCircle size={14} />
-                        Mark as Completed
-                      </button>
-                    </div>
-                  </div>
-                </InfoWindow>
-              );
-            })()}
-          </Map>
-        </APIProvider>
+                }}
+                className="w-full py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-lg text-[10px] font-extrabold flex items-center justify-center gap-2 hover:bg-emerald-100 transition shadow-sm cursor-pointer"
+              >
+                <CheckCircle size={14} />
+                Mark as Completed
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Full Photo Modal */}
         {fullPhoto && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 p-4 animate-fade-in backdrop-blur-md">
+          <div 
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 p-4 animate-fade-in backdrop-blur-xl"
+            onClick={() => setFullPhoto(null)}
+          >
             <button 
-              onClick={() => setFullPhoto(null)}
-              className="absolute top-6 right-6 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition"
+              onClick={(e) => {
+                e.stopPropagation();
+                setFullPhoto(null);
+              }}
+              className="absolute top-6 left-6 p-4 bg-white/10 hover:bg-white/20 backdrop-blur-md rounded-full text-white transition flex items-center gap-2 px-6 shadow-2xl border border-white/20 z-[10000] cursor-pointer"
             >
               <X size={24} />
+              <span className="font-bold text-base">Close Image</span>
             </button>
-            <div className="relative max-w-4xl max-h-[90vh] w-full flex items-center justify-center">
+            <div className="relative max-w-4xl max-h-[90vh] w-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
               <img 
                 src={fullPhoto} 
                 alt="Full preview" 

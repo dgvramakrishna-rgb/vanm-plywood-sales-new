@@ -7,9 +7,14 @@ export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
     define: {
-      'process.env.GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(process.env.GOOGLE_MAPS_PLATFORM_KEY || '')
+      'process.env.GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(
+        process.env.GOOGLE_MAPS_PLATFORM_KEY || 
+        process.env.VITE_GOOGLE_MAPS_PLATFORM_KEY || 
+        'AIzaSyAuc9SjTV5c7XMt7_AQHWW_jd2VVrEC5a4'
+      )
     },
     resolve: {
+      dedupe: ['react', 'react-dom'],
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
