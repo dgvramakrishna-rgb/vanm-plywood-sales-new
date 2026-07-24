@@ -35,6 +35,7 @@ export interface SiteVisit {
   leadStatus: 'hot' | 'cold';
   notes?: string;
   customerNotAvailable?: boolean;
+  gender?: 'male' | 'female';
   nearestLandmark?: string;
   pincode?: string;
   createdAt: string; // ISO String

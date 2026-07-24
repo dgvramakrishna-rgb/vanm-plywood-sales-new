@@ -356,6 +356,18 @@ export default function SiteVisitsMap({ visits, onEditVisit, onCompleteVisit, on
                     <p className="text-[10px] text-slate-500 font-medium">{selectedVisit.address || selectedVisit.location}</p>
                   </div>
                 </div>
+                {selectedVisit.contractorName && (
+                  <div className="mt-2 pt-2 border-t border-slate-100">
+                    <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider font-mono">Site Partner</p>
+                    <h4 className="text-xs font-black text-slate-900 m-0 leading-tight flex items-center gap-1.5 mt-0.5">
+                      {selectedVisit.contractorName}
+                    </h4>
+                    <div className="flex items-center gap-1 mt-0.5 text-emerald-600">
+                      <Phone size={10} />
+                      <p className="text-[10px] font-bold">{selectedVisit.contractorMobile}</p>
+                    </div>
+                  </div>
+                )}
                 <button 
                   onClick={() => onEditVisit?.(selectedVisit)}
                   className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition shrink-0 cursor-pointer"

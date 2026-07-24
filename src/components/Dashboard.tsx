@@ -130,7 +130,7 @@ export default function Dashboard({
   // Navigation tab state within the Home Page: overview, followups, reports, absent, places, dealers, completed, partners, call
   const [activeHomeTab, setActiveHomeTab] = useState<'overview' | 'followups' | 'reports' | 'absent' | 'places' | 'dealers' | 'completed' | 'partners' | 'map' | 'call'>('overview');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [mapType, setMapType] = useState<'google' | 'osm'>('google');
+  const [mapType, setMapType] = useState<'google' | 'osm'>('osm');
   
   const unsyncedCount = visits.filter(v => v.synced !== true).length;
 
@@ -1403,7 +1403,8 @@ export default function Dashboard({
         let baseName = v.clientName.replace(/\s+garu\b/gi, '').replace(/\s*\(owner\)/gi, '').trim();
         const name = `${baseName} garu (owner)`;
         const mobile = (v.clientMobile && v.clientMobile !== '0000000000') ? v.clientMobile : (v.address || v.location || 'Place of Work');
-        text += `${index + 1}.${name}, ${mobile},\ni explained the product details and he/she said I will call you\n\n`;
+        const pronoun = v.gender === 'female' ? 'she' : 'he';
+        text += `${index + 1}.${name}, ${mobile},\ni explained the product details and ${pronoun} said I will call you\n\n`;
       });
     }
 

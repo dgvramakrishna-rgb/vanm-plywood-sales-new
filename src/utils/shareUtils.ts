@@ -60,10 +60,9 @@ export async function shareVisitDetails({ title, text, url, photo, photoOnly }: 
     }
 
     if (navigator.share) {
-      const shareParams: any = {
-        title,
-        text: whatsappText,
-      };
+      const shareParams: any = {};
+      if (title) shareParams.title = title;
+      if (whatsappText) shareParams.text = whatsappText;
       
       // Try to include photo if it's a data URL and browser supports file sharing
       if (photo && photo.startsWith('data:')) {

@@ -147,6 +147,7 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
   const [leadStatus, setLeadStatus] = useState<'hot' | 'cold'>(initialData?.leadStatus || 'cold');
   const [notes, setNotes] = useState(initialData?.notes || '');
   const [customerNotAvailable, setCustomerNotAvailable] = useState<boolean>(initialData?.customerNotAvailable || false);
+  const [gender, setGender] = useState<'male' | 'female' | undefined>(initialData?.gender);
   const [nearestLandmark, setNearestLandmark] = useState<string>(initialData?.nearestLandmark || '');
 
   // Partner selection form visibility states (User-select-wise)
@@ -713,6 +714,7 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
       buildingType,
       leadStatus,
       customerNotAvailable,
+      gender,
       nearestLandmark: nearestLandmark.trim() || undefined,
       notes: notes.trim() || undefined
     });
@@ -825,6 +827,25 @@ export default function VisitForm({ onSave, onCancel, initialData, visits = [] }
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
                     </svg>
                   </span>
+                </div>
+              </div>
+
+              {/* Gender Selector */}
+              <div className="mt-3">
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5 font-sans">
+                  Gender (Optional)
+                </label>
+                <div className="relative font-sans">
+                  <select
+                    id="inp-gender"
+                    value={gender || ''}
+                    onChange={(e) => setGender(e.target.value ? (e.target.value as 'male' | 'female') : undefined)}
+                    className="w-full pl-3 pr-10 py-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 transition appearance-none cursor-pointer font-medium text-slate-800 interactive-highlight"
+                  >
+                    <option value="">Not Specified</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
                 </div>
               </div>
             </div>
